@@ -20,12 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"📤 [/start] Respuesta de bienvenida enviada a {username}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    username = f"@{user.username}" if user.username else user.first_name
-    raw_text = update.message.text
-    print(f"\n📥 [Texto] Mensaje recibido de {username} (ID: {user.id})")
-    print(f"📝 Contenido original: {raw_text!r}")
-
+    print(f"📩 ¡Mensaje de texto recibido de {update.message.chat.first_name}! Procesando...")
     msg = await update.message.reply_text("🧠 Formateando tu nota de texto con IA...")
     try:
         print("🤖 [IA] Enviando texto a Gemini...")
@@ -57,12 +52,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Error inesperado procesando la nota.")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    username = f"@{user.username}" if user.username else user.first_name
-    voice = update.message.voice
-    duration = voice.duration if voice else "N/A"
-    print(f"\n📥 [Voz] Nota de audio recibida de {username} (ID: {user.id}) | Duración: {duration}s")
-
+    print(f"🎙️ ¡Nota de voz recibida de {update.message.chat.first_name}! Procesando...")
     msg = await update.message.reply_text("🎧 Descargando nota de voz...")
     
     try:
