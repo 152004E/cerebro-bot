@@ -1,10 +1,10 @@
 import os
-import glob
 import time
 from google import genai
 from google.genai import types
 
 from core.config import GEMINI_API_KEY
+import core.rag as rag
 
 # Nuevo cliente moderno de Google GenAI
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -13,42 +13,23 @@ MODEL_NAME = 'gemini-2.5-flash'
 # Diccionario en memoria para guardar las sesiones de chat por usuario
 chat_sessions = {}
 
-def load_vault_context():
-    """Lee todos los archivos .md de la bóveda para darle contexto a la IA."""
-    vault_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../cerebro'))
-    context = ""
-    search_paths = [
-        os.path.join(vault_path, "02-Conocimiento", "**", "*.md"),
-        os.path.join(vault_path, "01-Proyectos", "**", "*.md")
-    ]
-    
-    files_read = 0
-    for path in search_paths:
-        for file_path in glob.glob(path, recursive=True):
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    context += f"\n\n--- Archivo: {os.path.basename(file_path)} ---\n{content}"
-                    files_read += 1
-            except Exception:
-                pass
-    print(f"📚 [Vault Context] Se leyeron {files_read} archivos de la bóveda.")
-    return context
+# Sincronizar embeddings al iniciar el módulo
+vault_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../cerebro'))
+try:
+    rag.sync_vault_embeddings(client, vault_path)
+except Exception as e:
+    print(f"Error sincronizando embeddings: {e}")
 
 def get_or_create_chat(user_id: int):
     if user_id not in chat_sessions:
         print(f"🆕 Iniciando nueva sesión de chat conversacional (Con Búsqueda Web) para usuario {user_id}")
         system_instruction = (
-            "Eres el asistente de ideación y arquitecto de conocimiento personal del usuario. "
+            "Eres el asistente de ideación y arquitecto de conocimiento personal del usuario.\n"
             "Tu misión es ayudar a desarrollar y pulir ideas. Para ello, TIENES DOS FUENTES PRINCIPALES DE VERDAD:\n"
-            "1. La Bóveda del Usuario: Conecta sus ideas con los proyectos que ya tiene (contexto más abajo).\n"
-            "2. Internet (Google Search): Si el usuario te pide investigar algo que no está en la bóveda, o necesitas información "
-            "actualizada para desarrollar su idea, TIENES PERMISO Y DEBES usar tu herramienta de búsqueda. "
-            "Cuando busques en la web, prioriza siempre resultados de foros especializados, Reddit y documentación técnica oficial.\n\n"
+            "1. La Bóveda del Usuario: El usuario te enviará fragmentos de su bóveda como contexto de ser necesario.\n"
+            "2. Internet (Google Search): Si la pregunta no se responde con la bóveda, o necesitas información actualizada, TIENES PERMISO Y DEBES usar tu herramienta de búsqueda.\n\n"
             "En lugar de simplemente guardar la información, debes debatir, hacer preguntas inteligentes para profundizar en la idea. "
-            "Sé conciso, directo y técnico (tu personalidad se basa en los archivos AGENTS.md).\n\n"
-            "A continuación, tienes el contexto actual de toda la bóveda del usuario:\n"
-            f"{load_vault_context()}"
+            "Sé conciso, directo y técnico."
         )
         
         chat = client.chats.create(
@@ -87,8 +68,18 @@ def chat_with_gemini(user_id: int, text: str) -> dict:
     try:
         chat = get_or_create_chat(user_id)
         
+        # Búsqueda RAG
+        context = rag.search_vault(client, text)
+        
+        final_prompt = text
+        if context:
+            print(f"📚 Inyectando contexto RAG...")
+            final_prompt = f"--- Contexto recuperado de la Bóveda ---\n{context}\n\n--- Mensaje del Usuario ---\n{text}"
+        else:
+            print(f"🌐 Sin contexto RAG, confiando en conocimiento general/Google Search...")
+        
         start_time = time.time()
-        response = chat.send_message(text)
+        response = chat.send_message(final_prompt)
         latency = time.time() - start_time
         
         tokens = 0

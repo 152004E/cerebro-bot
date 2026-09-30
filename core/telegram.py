@@ -1,6 +1,8 @@
 import os
 import tempfile
 import logging
+import re
+import html
 import telegram.error
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, TypeHandler
@@ -12,19 +14,54 @@ from core.telemetry import log_success, log_error, get_user_stats, MAX_DAILY_REQ
 
 logger = logging.getLogger("cerebro.bot")
 
-def get_save_keyboard():
-    """Genera el teclado con el botón de guardado."""
-    keyboard = [
-        [InlineKeyboardButton("💾 Guardar Idea en la Bóveda", callback_data='save_vault')]
-    ]
+import time
+
+user_requests_minute = []
+
+def get_dynamic_keyboard(latency: float, tokens: int, response_text: str):
+    """Genera el teclado dinámico con métricas en la fila 1 y botón guardar en la fila 2 (condicionado)."""
+    global user_requests_minute
+    current_time = time.time()
+    
+    # 1. Limpiar peticiones de hace más de 60 segundos
+    user_requests_minute = [t for t in user_requests_minute if current_time - t < 60]
+    rpm = len(user_requests_minute)
+    
+    keyboard = []
+    
+    # Fila 1: Métricas informativas
+    if latency is not None and tokens is not None:
+        metrics_text = f"⏱️ {latency:.1f}s | 🪙 {tokens/1000:.1f}k tk | 🚦 {rpm}/15 RPM"
+        keyboard.append([InlineKeyboardButton(metrics_text, callback_data='ignore')])
+        
+    # Fila 2: Botón Guardar (solo si la respuesta parece un debate desarrollado)
+    if len(response_text) > 150:
+        keyboard.append([InlineKeyboardButton("💾 Guardar Idea en Obsidian", callback_data='save_vault')])
+        
+    if not keyboard:
+        return None
+        
     return InlineKeyboardMarkup(keyboard)
 
-def format_telemetry_header(latency: float, tokens: int, stats: dict) -> str:
-    """Formatea el encabezado con las métricas del mensaje actual y las globales"""
-    return (
-        f"📊 `[⏱️ {latency:.1f}s | 🪙 {tokens/1000:.1f}k tokens]`\n"
-        f"🔄 `[Uso Diario: {stats['requests']}/{MAX_DAILY_REQUESTS}]`\n\n"
-    )
+def format_for_telegram_html(text: str) -> str:
+    """Convierte Markdown estándar al HTML seguro y limpio de Telegram."""
+    # 1. Escapamos caracteres HTML para evitar que etiquetas como <twisty-player> rompan el parseo
+    text = html.escape(text)
+    
+    # 2. Reemplazamos viñetas de asterisco por puntos elegantes (Bullet points)
+    text = re.sub(r'^\s*\*\s+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*-\s+', '• ', text, flags=re.MULTILINE)
+    
+    # 3. Negritas: **texto** -> <b>texto</b>
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    
+    # 4. Código en línea: `codigo` -> <code>codigo</code>
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+    
+    # 5. Enlaces: [texto](url) -> <a href="url">texto</a>
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+    
+    return text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -43,7 +80,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = get_user_stats(user_id)
     
     if stats['requests'] >= MAX_DAILY_REQUESTS:
-        await update.message.reply_text("⚠️ Has alcanzado tu límite de 1500 respuestas por hoy.")
+        await update.message.reply_text(f"⚠️ Has alcanzado tu límite de {MAX_DAILY_REQUESTS} respuestas por hoy.")
         return
         
     print(f"📩 ¡Mensaje de texto recibido! Iniciando debate...")
@@ -51,6 +88,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         raw_text = update.message.text
+        user_requests_minute.append(time.time())
         result = chat_with_gemini(user_id, raw_text)
         
         if not result:
@@ -59,18 +97,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         log_success(user_id, result["tokens"], result["latency"])
-        new_stats = get_user_stats(user_id)
         
-        header = format_telemetry_header(result["latency"], result["tokens"], new_stats)
-        final_msg = header + result["text"]
+        # Limpiamos el texto a formato HTML de Telegram
+        html_msg = format_for_telegram_html(result["text"])
+        
+        # Obtenemos el teclado con las métricas inyectadas y botón condicional
+        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"])
         
         try:
-            await msg.edit_text(final_msg, reply_markup=get_save_keyboard(), parse_mode='Markdown')
+            if keyboard:
+                await msg.edit_text(html_msg, reply_markup=keyboard, parse_mode='HTML')
+            else:
+                await msg.edit_text(html_msg, parse_mode='HTML')
         except telegram.error.BadRequest as e:
             if "parse entities" in str(e).lower():
-                print("⚠️ [Telegram Markdown Error] Falló el parseo. Enviando como texto plano.")
-                # Fallback sin formato Markdown
-                await msg.edit_text(final_msg, reply_markup=get_save_keyboard())
+                print("⚠️ [Telegram HTML Error] Falló el parseo. Enviando sin formato.")
+                # Fallback extremo si falla el HTML
+                await msg.edit_text(result["text"], reply_markup=keyboard)
             else:
                 raise
         
@@ -84,7 +127,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = get_user_stats(user_id)
     
     if stats['requests'] >= MAX_DAILY_REQUESTS:
-        await update.message.reply_text("⚠️ Has alcanzado tu límite de 1500 respuestas por hoy.")
+        await update.message.reply_text(f"⚠️ Has alcanzado tu límite de {MAX_DAILY_REQUESTS} respuestas por hoy.")
         return
         
     print(f"🎙️ ¡Nota de voz recibida! Procesando...")
@@ -109,8 +152,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("❌ Hubo un error transcribiendo el audio.")
             return
             
-        await msg.edit_text(f"🗣️ *Tú dijiste:* _{transcription}_\n\n🧠 Pensando mi respuesta y consultando la bóveda...", parse_mode='Markdown')
+        await msg.edit_text(f"🗣️ <i>Tú dijiste:</i> {html.escape(transcription)}\n\n🧠 Pensando mi respuesta y consultando la bóveda...", parse_mode='HTML')
         
+        user_requests_minute.append(time.time())
         result = chat_with_gemini(user_id, transcription)
         
         if not result:
@@ -119,18 +163,23 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         log_success(user_id, result["tokens"], result["latency"])
-        new_stats = get_user_stats(user_id)
         
-        header = format_telemetry_header(result["latency"], result["tokens"], new_stats)
-        final_msg = f"🗣️ Tú dijiste: {transcription}\n\n" + header + result["text"]
+        # Limpiamos el texto a formato HTML
+        html_response = format_for_telegram_html(result["text"])
+        final_msg = f"🗣️ <i>Tú dijiste: {html.escape(transcription)}</i>\n\n" + html_response
+        
+        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"])
         
         try:
-            await msg.edit_text(final_msg, reply_markup=get_save_keyboard(), parse_mode='Markdown')
+            if keyboard:
+                await msg.edit_text(final_msg, reply_markup=keyboard, parse_mode='HTML')
+            else:
+                await msg.edit_text(final_msg, parse_mode='HTML')
         except telegram.error.BadRequest as e:
             if "parse entities" in str(e).lower():
-                print("⚠️ [Telegram Markdown Error] Falló el parseo. Enviando como texto plano.")
-                # Fallback sin formato Markdown
-                await msg.edit_text(final_msg, reply_markup=get_save_keyboard())
+                print("⚠️ [Telegram HTML Error] Falló el parseo. Enviando sin formato.")
+                # Fallback extremo
+                await msg.edit_text(result["text"], reply_markup=keyboard)
             else:
                 raise
             
@@ -143,6 +192,9 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
+    if query.data == 'ignore':
+        return
+        
     if query.data == 'save_vault':
         user_id = update.effective_user.id
         await query.edit_message_text(text="⏳ Resumiendo la conversación y extrayendo ideas clave...")
@@ -157,12 +209,14 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         log_success(user_id, result["tokens"], result["latency"])
         markdown_text = result["text"]
         
-        await query.edit_message_text(text="🐙 Inyectando resumen en tu repositorio de GitHub...")
+        await query.edit_message_text(text="🐙 Inyectando resumen en tu repositorio de Obsidian (Vía GitHub)...")
         file_path = upload_to_obsidian(markdown_text)
         
         if file_path:
-            # Siempre se asume seguro porque nosotros construimos este path sin Markdown de Gemini
-            await query.edit_message_text(text=f"✅ ¡Éxito! La idea desarrollada se guardó en:\n`{file_path}`", parse_mode='Markdown')
+            await query.edit_message_text(
+                text=f"✅ ¡Éxito! La idea desarrollada se guardó en:\n<code>{html.escape(file_path)}</code>", 
+                parse_mode='HTML'
+            )
         else:
             await query.edit_message_text(text="❌ Falló la subida a GitHub.")
 
