@@ -87,6 +87,128 @@ async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("La memoria ya estaba vacía.")
 
+async def cmd_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    texto = (
+        "🛠️ <b>Comandos Disponibles</b>\n\n"
+        "🔸 /comandos - Muestra esta lista de ayuda.\n"
+        "🔸 /reintentar - Vuelve a enviar tu último mensaje (útil si hay error 503).\n"
+        "🔸 /guardar - Guarda la conversación actual en Obsidian directamente.\n"
+        "🔸 /estado - Muestra el estado del sistema, límite de mensajes y archivos indexados.\n"
+        "🔸 /limpiar - Borra la memoria del chat actual para empezar una idea nueva.\n"
+    )
+    await update.message.reply_text(texto, parse_mode='HTML')
+
+async def cmd_reintentar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in last_user_prompts:
+        await update.message.reply_text("❌ No hay ningún mensaje anterior para reintentar.")
+        return
+        
+    stats = get_user_stats(user_id)
+    if stats['requests'] >= MAX_DAILY_REQUESTS:
+        await update.message.reply_text(f"⚠️ Has alcanzado tu límite de {MAX_DAILY_REQUESTS} respuestas por hoy.")
+        return
+
+    text = last_user_prompts[user_id]
+    msg = await update.message.reply_text("🔄 Reintentando tu último mensaje...\n🧠 Pensando y consultando la bóveda...")
+    await execute_gemini_flow(msg, user_id, text)
+
+async def cmd_guardar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    msg = await update.message.reply_text("⏳ Resumiendo la conversación y extrayendo ideas clave...")
+    
+    result = generate_final_markdown(user_id)
+    
+    if not result:
+        log_error(user_id)
+        await msg.edit_text("❌ No se pudo generar el resumen final o la sesión ya expiró.")
+        return
+        
+    log_success(user_id, result["tokens"], result["latency"])
+    markdown_text = result["text"]
+    
+    await msg.edit_text("🐙 Inyectando resumen en tu repositorio de Obsidian (Vía GitHub)...")
+    file_path = upload_to_obsidian(markdown_text)
+    
+    if file_path:
+        await msg.edit_text(
+            f"✅ ¡Éxito! La idea desarrollada se guardó en:\n<code>{html.escape(file_path)}</code>", 
+            parse_mode='HTML'
+        )
+    else:
+        await msg.edit_text("❌ Falló la subida a GitHub.")
+
+async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    stats = get_user_stats(user_id)
+    
+    import core.rag as rag
+    import json
+    import os
+    
+    vault_size = 0
+    if os.path.exists(rag.CACHE_FILE):
+        try:
+            with open(rag.CACHE_FILE, 'r', encoding='utf-8') as f:
+                cache = json.load(f)
+                vault_size = len(cache)
+        except Exception:
+            pass
+    
+    texto = (
+        "📊 <b>Estado del Sistema</b>\n\n"
+        f"✉️ <b>Mensajes Hoy:</b> {stats['requests']} / {MAX_DAILY_REQUESTS}\n"
+        f"📚 <b>Archivos Indexados (RAG):</b> {vault_size}\n"
+        f"🧠 <b>Modelo Activo:</b> gemini-3.5-flash-lite\n"
+        f"⚠️ <b>Errores Hoy:</b> {stats.get('errors', 0)}\n"
+    )
+    await update.message.reply_text(texto, parse_mode='HTML')
+
+last_user_prompts = {}
+
+async def execute_gemini_flow(msg, user_id, text, prefix_html=""):
+    """Función central que llama a Gemini y actualiza el mensaje en Telegram."""
+    global user_requests_minute
+    last_user_prompts[user_id] = text
+    
+    try:
+        user_requests_minute.append(time.time())
+        result = chat_with_gemini(user_id, text)
+        
+        if not result:
+            log_error(user_id)
+            await msg.edit_text(prefix_html + "❌ Hubo un error al comunicarme con Gemini.", parse_mode='HTML')
+            return
+            
+        if "error" in result and result["error"] == "rate_limit":
+            await msg.edit_text(prefix_html + "⚠️ <b>Límite de Google alcanzado (15 pet/min)</b>.\nEspera ~30 segundos y vuelve a intentar.", parse_mode='HTML')
+            return
+            
+        log_success(user_id, result["tokens"], result["latency"])
+        stats = get_user_stats(user_id)
+        
+        html_response = format_for_telegram_html(result["text"])
+        final_msg = prefix_html + html_response
+        
+        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"], stats['requests'])
+        
+        try:
+            if keyboard:
+                await msg.edit_text(final_msg, reply_markup=keyboard, parse_mode='HTML')
+            else:
+                await msg.edit_text(final_msg, parse_mode='HTML')
+        except telegram.error.BadRequest as e:
+            if "parse entities" in str(e).lower():
+                print("⚠️ [Telegram HTML Error] Falló el parseo. Enviando sin formato.")
+                await msg.edit_text(result["text"], reply_markup=keyboard)
+            else:
+                raise
+                
+    except Exception as e:
+        print(f"❌ [Error] Excepción en execute_gemini_flow: {e}")
+        log_error(user_id)
+        await msg.edit_text(prefix_html + "❌ Error inesperado procesando la respuesta.", parse_mode='HTML')
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     stats = get_user_stats(user_id)
@@ -97,46 +219,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     print(f"📩 ¡Mensaje de texto recibido! Iniciando debate...")
     msg = await update.message.reply_text("🧠 Pensando y consultando la bóveda...")
+    raw_text = update.message.text
     
-    try:
-        raw_text = update.message.text
-        user_requests_minute.append(time.time())
-        result = chat_with_gemini(user_id, raw_text)
-        
-        if not result:
-            log_error(user_id)
-            await msg.edit_text("❌ Hubo un error al comunicarme con Gemini.")
-            return
-            
-        if "error" in result and result["error"] == "rate_limit":
-            await msg.edit_text("⚠️ <b>Límite de Google alcanzado (15 pet/min)</b>.\nEl modelo gratuito necesita un respiro. Espera ~30 segundos y vuelve a enviar tu mensaje.", parse_mode='HTML')
-            return
-            
-        log_success(user_id, result["tokens"], result["latency"])
-        
-        # Limpiamos el texto a formato HTML de Telegram
-        html_msg = format_for_telegram_html(result["text"])
-        
-        # Obtenemos el teclado con las métricas inyectadas y botón condicional
-        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"], stats['requests'] + 1)
-        
-        try:
-            if keyboard:
-                await msg.edit_text(html_msg, reply_markup=keyboard, parse_mode='HTML')
-            else:
-                await msg.edit_text(html_msg, parse_mode='HTML')
-        except telegram.error.BadRequest as e:
-            if "parse entities" in str(e).lower():
-                print("⚠️ [Telegram HTML Error] Falló el parseo. Enviando sin formato.")
-                # Fallback extremo si falla el HTML
-                await msg.edit_text(result["text"], reply_markup=keyboard)
-            else:
-                raise
-        
-    except Exception as e:
-        print(f"❌ [Error] Excepción en handle_text: {e}")
-        log_error(user_id)
-        await msg.edit_text("❌ Error inesperado procesando la respuesta.")
+    await execute_gemini_flow(msg, user_id, raw_text)
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -168,40 +253,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("❌ Hubo un error transcribiendo el audio.")
             return
             
-        await msg.edit_text(f"🗣️ <i>Tú dijiste:</i> {html.escape(transcription)}\n\n🧠 Pensando mi respuesta y consultando la bóveda...", parse_mode='HTML')
+        prefix_html = f"🗣️ <i>Tú dijiste: {html.escape(transcription)}</i>\n\n"
+        await msg.edit_text(prefix_html + "🧠 Pensando mi respuesta y consultando la bóveda...", parse_mode='HTML')
         
-        user_requests_minute.append(time.time())
-        result = chat_with_gemini(user_id, transcription)
-        
-        if not result:
-            log_error(user_id)
-            await msg.edit_text("❌ Hubo un error de IA al procesar el debate.")
-            return
-            
-        if "error" in result and result["error"] == "rate_limit":
-            await msg.edit_text("⚠️ <b>Límite de Google alcanzado (15 pet/min)</b>.\nEl modelo gratuito necesita un respiro. Espera ~30 segundos y vuelve a enviar tu nota de voz.", parse_mode='HTML')
-            return
-            
-        log_success(user_id, result["tokens"], result["latency"])
-        
-        # Limpiamos el texto a formato HTML
-        html_response = format_for_telegram_html(result["text"])
-        final_msg = f"🗣️ <i>Tú dijiste: {html.escape(transcription)}</i>\n\n" + html_response
-        
-        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"], stats['requests'] + 1)
-        
-        try:
-            if keyboard:
-                await msg.edit_text(final_msg, reply_markup=keyboard, parse_mode='HTML')
-            else:
-                await msg.edit_text(final_msg, parse_mode='HTML')
-        except telegram.error.BadRequest as e:
-            if "parse entities" in str(e).lower():
-                print("⚠️ [Telegram HTML Error] Falló el parseo. Enviando sin formato.")
-                # Fallback extremo
-                await msg.edit_text(result["text"], reply_markup=keyboard)
-            else:
-                raise
+        await execute_gemini_flow(msg, user_id, transcription, prefix_html)
             
     except Exception as e:
         print(f"❌ [Error] Excepción en handle_voice: {e}")
@@ -252,6 +307,10 @@ def setup_bot():
     app.add_handler(TypeHandler(Update, debug_raw_update), group=-1)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("limpiar", cmd_limpiar))
+    app.add_handler(CommandHandler("comandos", cmd_comandos))
+    app.add_handler(CommandHandler("reintentar", cmd_reintentar))
+    app.add_handler(CommandHandler("guardar", cmd_guardar))
+    app.add_handler(CommandHandler("estado", cmd_estado))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_button_callback))
