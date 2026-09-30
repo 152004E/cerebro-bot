@@ -34,6 +34,12 @@ def health_check():
     return {"status": "ok", "message": "Microservicio Bot activo"}
 
 if __name__ == "__main__":
-    print("Iniciando Bot de pruebas locales (Polling)...")
-    print("Abre Telegram y envíale una nota de voz a tu bot.")
-    telegram_app.run_polling()
+    print("\n" + "="*50)
+    print("🚀 [Cerebro Bot] Iniciando en modo Polling (Pruebas Locales)...")
+    print("🤖 Bot listo: @Mi_cerebro_magico_bot")
+    print("👉 Enlace directo al chat: https://t.me/Mi_cerebro_magico_bot")
+    print("👉 Abre Telegram, busca tu bot y envíale /start, un texto o una nota de voz.")
+    print("="*50 + "\n")
+    telegram_app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
+
+
