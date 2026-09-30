@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 TELEMETRY_FILE = "telemetry.json"
-MAX_DAILY_REQUESTS = 1500
+MAX_DAILY_REQUESTS = 500
 
 def get_today_str():
     return datetime.now().strftime("%Y-%m-%d")

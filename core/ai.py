@@ -8,7 +8,7 @@ import core.rag as rag
 
 # Nuevo cliente moderno de Google GenAI
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = 'gemini-2.5-flash'
+MODEL_NAME = 'gemini-3.5-flash-lite'
 
 # Diccionario en memoria para guardar las sesiones de chat por usuario
 chat_sessions = {}

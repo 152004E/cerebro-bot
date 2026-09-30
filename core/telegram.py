@@ -18,7 +18,7 @@ import time
 
 user_requests_minute = []
 
-def get_dynamic_keyboard(latency: float, tokens: int, response_text: str):
+def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, current_requests: int = 0):
     """Genera el teclado dinámico con métricas en la fila 1 y botón guardar en la fila 2 (condicionado)."""
     global user_requests_minute
     current_time = time.time()
@@ -31,11 +31,13 @@ def get_dynamic_keyboard(latency: float, tokens: int, response_text: str):
     
     # Fila 1: Métricas informativas
     if latency is not None and tokens is not None:
-        metrics_text = f"⏱️ {latency:.1f}s | 🪙 {tokens/1000:.1f}k tk | 🚦 {rpm}/15 RPM"
+        tokens_left = 250000 - tokens
+        if tokens_left < 0: tokens_left = 0
+        metrics_text = f"⏱️ {latency:.1f}s | 🧠 Memoria Libre: {tokens_left/1000:.0f}k | ✉️ {MAX_DAILY_REQUESTS - current_requests} msg hoy"
         keyboard.append([InlineKeyboardButton(metrics_text, callback_data='ignore')])
         
-    # Fila 2: Botón Guardar (solo si la respuesta parece un debate desarrollado)
-    if len(response_text) > 150:
+    # Fila 2: Botón Guardar (solo si la respuesta es extensa y parece un debate)
+    if len(response_text) > 500:
         keyboard.append([InlineKeyboardButton("💾 Guardar Idea en Obsidian", callback_data='save_vault')])
         
     if not keyboard:
@@ -72,8 +74,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🧠 ¡Hola! Soy el Bot de tu Cerebro Digital.\n"
         "Ahora soy tu Asistente de Ideación. Envíame notas de voz o mensajes de texto. "
         "Leeré el contexto de tu bóveda y debatiré contigo para desarrollar tus ideas.\n\n"
-        "Cuando hayamos concluido, pulsa el botón 'Guardar' para estructurar la conversación y enviarla a Obsidian."
+        "Cuando hayamos concluido, pulsa el botón 'Guardar' para estructurar la conversación y enviarla a Obsidian.\n"
+        "Si quieres cambiar de tema sin guardar, usa el comando /limpiar."
     )
+
+async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    from core.ai import chat_sessions
+    if user_id in chat_sessions:
+        del chat_sessions[user_id]
+        await update.message.reply_text("🧹 Memoria limpiada. ¡Listo para una nueva idea!")
+    else:
+        await update.message.reply_text("La memoria ya estaba vacía.")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -106,7 +118,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         html_msg = format_for_telegram_html(result["text"])
         
         # Obtenemos el teclado con las métricas inyectadas y botón condicional
-        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"])
+        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"], stats['requests'] + 1)
         
         try:
             if keyboard:
@@ -176,7 +188,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         html_response = format_for_telegram_html(result["text"])
         final_msg = f"🗣️ <i>Tú dijiste: {html.escape(transcription)}</i>\n\n" + html_response
         
-        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"])
+        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"], stats['requests'] + 1)
         
         try:
             if keyboard:
@@ -239,6 +251,7 @@ def setup_bot():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(TypeHandler(Update, debug_raw_update), group=-1)
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("limpiar", cmd_limpiar))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_button_callback))
