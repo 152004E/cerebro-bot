@@ -97,7 +97,7 @@ def sync_vault_embeddings(client: genai.Client, vault_path: str):
         
     return current_files
 
-def search_vault(client: genai.Client, query: str, top_k: int = 3, threshold: float = 0.65) -> str:
+def search_vault(client: genai.Client, query: str, top_k: int = 3, threshold: float = 0.60) -> str:
     if not os.path.exists(CACHE_FILE):
         return ""
         

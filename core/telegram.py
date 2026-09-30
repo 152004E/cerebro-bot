@@ -96,6 +96,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("❌ Hubo un error al comunicarme con Gemini.")
             return
             
+        if "error" in result and result["error"] == "rate_limit":
+            await msg.edit_text("⚠️ <b>Límite de Google alcanzado (15 pet/min)</b>.\nEl modelo gratuito necesita un respiro. Espera ~30 segundos y vuelve a enviar tu mensaje.", parse_mode='HTML')
+            return
+            
         log_success(user_id, result["tokens"], result["latency"])
         
         # Limpiamos el texto a formato HTML de Telegram
@@ -160,6 +164,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not result:
             log_error(user_id)
             await msg.edit_text("❌ Hubo un error de IA al procesar el debate.")
+            return
+            
+        if "error" in result and result["error"] == "rate_limit":
+            await msg.edit_text("⚠️ <b>Límite de Google alcanzado (15 pet/min)</b>.\nEl modelo gratuito necesita un respiro. Espera ~30 segundos y vuelve a enviar tu nota de voz.", parse_mode='HTML')
             return
             
         log_success(user_id, result["tokens"], result["latency"])

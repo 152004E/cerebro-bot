@@ -22,12 +22,12 @@ except Exception as e:
 
 def get_or_create_chat(user_id: int):
     if user_id not in chat_sessions:
-        print(f"🆕 Iniciando nueva sesión de chat conversacional (Con Búsqueda Web) para usuario {user_id}")
+        print(f"🆕 Iniciando nueva sesión de chat conversacional para usuario {user_id}")
         system_instruction = (
             "Eres el asistente de ideación y arquitecto de conocimiento personal del usuario.\n"
-            "Tu misión es ayudar a desarrollar y pulir ideas. Para ello, TIENES DOS FUENTES PRINCIPALES DE VERDAD:\n"
+            "Tu misión es ayudar a desarrollar y pulir ideas basándote en:\n"
             "1. La Bóveda del Usuario: El usuario te enviará fragmentos de su bóveda como contexto de ser necesario.\n"
-            "2. Internet (Google Search): Si la pregunta no se responde con la bóveda, o necesitas información actualizada, TIENES PERMISO Y DEBES usar tu herramienta de búsqueda.\n\n"
+            "2. Tu Conocimiento Base: Usa tu inteligencia para aportar conceptos técnicos, arquitecturas y soluciones avanzadas.\n\n"
             "En lugar de simplemente guardar la información, debes debatir, hacer preguntas inteligentes para profundizar en la idea. "
             "Sé conciso, directo y técnico."
         )
@@ -36,7 +36,6 @@ def get_or_create_chat(user_id: int):
             model=MODEL_NAME,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                tools=[{"google_search": {}}],  # Activamos Google Search Grounding
                 temperature=0.7
             )
         )
@@ -92,7 +91,10 @@ def chat_with_gemini(user_id: int, text: str) -> dict:
             "latency": latency
         }
     except Exception as e:
-        print(f"❌ [Gemini Chat Error] {e}")
+        error_msg = str(e)
+        print(f"❌ [Gemini Chat Error] {error_msg}")
+        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg.upper():
+            return {"error": "rate_limit"}
         return None
 
 def generate_final_markdown(user_id: int) -> dict:
