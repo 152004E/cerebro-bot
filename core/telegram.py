@@ -33,7 +33,7 @@ def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, curren
     if latency is not None and tokens is not None:
         tokens_left = 250000 - tokens
         if tokens_left < 0: tokens_left = 0
-        metrics_text = f"⏱️ {latency:.1f}s | 🧠 Memoria Libre: {tokens_left/1000:.0f}k | ✉️ {MAX_DAILY_REQUESTS - current_requests} msg hoy"
+        metrics_text = f"⏱️ {latency:.1f}s | 🧠 {tokens_left/1000:.0f}k | ✉️ {MAX_DAILY_REQUESTS - current_requests}/{MAX_DAILY_REQUESTS}"
         keyboard.append([InlineKeyboardButton(metrics_text, callback_data='ignore')])
         
     # Fila 2: Botón Guardar (solo si la respuesta es extensa y parece un debate)
