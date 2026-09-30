@@ -23,6 +23,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"📩 ¡Mensaje de texto recibido de {update.message.chat.first_name}! Procesando...")
     msg = await update.message.reply_text("🧠 Formateando tu nota de texto con IA...")
     try:
+        raw_text = update.message.text
         print("🤖 [IA] Enviando texto a Gemini...")
         markdown_text = process_text_to_markdown(raw_text)
         
@@ -56,6 +57,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🎧 Descargando nota de voz...")
     
     try:
+        voice = update.message.voice
         file = await context.bot.get_file(voice.file_id)
         
         with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as tmp_file:
