@@ -1,9 +1,9 @@
 {
   "8903520901": {
     "date": "2026-10-02",
-    "requests": 18,
-    "total_tokens": 23488,
-    "latency_seconds_sum": 42.34985041618347,
-    "errors": 0
+    "requests": 40,
+    "total_tokens": 116041,
+    "latency_seconds_sum": 80.0548689365387,
+    "errors": 2
   }
 }

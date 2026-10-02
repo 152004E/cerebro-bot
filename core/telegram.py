@@ -17,32 +17,35 @@ logger = logging.getLogger("cerebro.bot")
 import time
 
 user_requests_minute = []
+trivia_options = {}
 
-def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, current_requests: int = 0, is_traductor: bool = False):
-    """Genera el teclado dinámico con métricas en la fila 1 y botón guardar en la fila 2 (condicionado)."""
+def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, current_requests: int = 0, is_traductor: bool = False, is_tutor: bool = False, ai_buttons: list = None, user_id: int = None):
+    """Genera el teclado dinámico con métricas en la fila 1 y botones condicionados en filas posteriores."""
     global user_requests_minute
     current_time = time.time()
     
-    # 1. Limpiar peticiones de hace más de 60 segundos
     user_requests_minute = [t for t in user_requests_minute if current_time - t < 60]
     rpm = len(user_requests_minute)
     
     keyboard = []
     
-    # Fila 1: Métricas informativas
     if latency is not None and tokens is not None:
         tokens_left = 250000 - tokens
         if tokens_left < 0: tokens_left = 0
         metrics_text = f"⏱️ {latency:.1f}s | 🧠 {tokens_left/1000:.0f}k | ✉️ {MAX_DAILY_REQUESTS - current_requests}/{MAX_DAILY_REQUESTS}"
         keyboard.append([InlineKeyboardButton(metrics_text, callback_data='ignore')])
         
-    # Fila 2: Botones especiales
+    if ai_buttons and user_id:
+        trivia_options[user_id] = ai_buttons
+        for i, btn_text in enumerate(ai_buttons):
+            keyboard.append([InlineKeyboardButton(f"🔸 {btn_text}", callback_data=f"ai_ans_{i}")])
+            
     if is_traductor:
         keyboard.append([
             InlineKeyboardButton("💾 Guardar Palabra", callback_data='save_vault_traductor'),
             InlineKeyboardButton("❓ Explicar mejor", callback_data='btn_explicar_mejor')
         ])
-    elif len(response_text) > 500:
+    elif not is_tutor and len(response_text) > 500:
         keyboard.append([InlineKeyboardButton("💾 Guardar Idea en Obsidian", callback_data='save_vault')])
         
     if not keyboard:
@@ -217,12 +220,16 @@ async def execute_gemini_flow(msg, user_id, text, prefix_html=""):
         stats = get_user_stats(user_id)
         
         is_traductor = "[MODO_TRADUCTOR]" in result["text"]
-        clean_text = result["text"].replace("[MODO_TRADUCTOR]", "").strip()
+        is_tutor = "[MODO_TUTOR]" in result["text"]
+        ai_buttons = re.findall(r'\[BOTON:\s*(.*?)\]', result["text"])
+        
+        clean_text = result["text"].replace("[MODO_TRADUCTOR]", "").replace("[MODO_TUTOR]", "").strip()
+        clean_text = re.sub(r'\[BOTON:\s*.*?\]', '', clean_text).strip()
         
         html_response = format_for_telegram_html(clean_text)
         final_msg = prefix_html + html_response
         
-        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], clean_text, stats['requests'], is_traductor)
+        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], clean_text, stats['requests'], is_traductor, is_tutor, ai_buttons, user_id)
         
         try:
             if keyboard:
@@ -303,6 +310,32 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     if query.data == 'ignore':
         return
         
+    if query.data.startswith('ai_ans_'):
+        idx_str = query.data.replace('ai_ans_', '')
+        user_opts = trivia_options.get(user_id, [])
+        
+        if idx_str.isdigit():
+            idx = int(idx_str)
+            answer = user_opts[idx] if idx < len(user_opts) else f"Opción {idx+1}"
+        else:
+            answer = idx_str # Compatibilidad con botones viejos
+            
+        msg = await query.message.reply_text(f"🗣️ Elegiste: <b>{html.escape(answer)}</b>\n🧠 Evaluando...", parse_mode='HTML')
+        
+        prompt = (
+            f"[SISTEMA] El usuario seleccionó la opción: '{answer}'. Actúa como máquina de Trivia. "
+            "Tu respuesta debe ir DIRECTO AL GRANO con esta estructura EXACTA:\n\n"
+            "[Dime si acertó o falló MUY brevemente, ej: '✅ ¡Correcto!' o '❌ Fallaste, era X'].\n\n"
+            "Pregunta: [Formula una NUEVA pregunta precisa de mi vocabulario ('Idiomas/Ingles')].\n"
+            "NOTA: Si mi Vocabulario tiene muy pocas palabras para hacer preguntas variadas, INVENTA TÚ MISMO una pregunta sobre una palabra nueva en inglés (nivel intermedio) que no esté en mi vocabulario para que yo la aprenda.\n\n"
+            "REGLAS:\n"
+            "1. NO hables de tu proceso de lectura ni incluyas introducciones.\n"
+            "2. Dame 3 nuevas opciones obligatoriamente usando el formato: [BOTON: Opcion].\n"
+            "3. Termina el mensaje con la etiqueta secreta: [MODO_TUTOR]"
+        )
+        await execute_gemini_flow(msg, user_id, prompt)
+        return
+        
     # Navegación de menús
     if query.data == 'btn_mas_opciones':
         await query.message.edit_reply_markup(reply_markup=get_more_options_keyboard())
@@ -337,11 +370,11 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     # Fase 3: Modo Traductor y Diccionario
     if query.data == 'btn_ingles':
         prompt = (
-            "Actúa en MODO TRADUCTOR. "
+            "Actúa en MODO TRADUCTOR DE INGLÉS AMERICANO. "
             "Cuando te dé una palabra, sé EXTREMADAMENTE CONCISO (máximo 3 líneas). "
             "1. SI ES VERBO: Categoría, significado, Presente/Pasado/Perfecto, y 1 ejemplo. "
             "2. SI NO ES VERBO: Categoría, qué es, para qué se usa y 1 ejemplo. "
-            "3. PRONUNCIACIÓN: Al final, incluye siempre la pronunciación figurada (fácil de leer en español, ej: /wórd/). "
+            "3. PRONUNCIACIÓN: Al final, incluye siempre la pronunciación figurada ESTILO AMERICANO (ej. la 'r' fuerte, la 't' como 'd' suave, etc.). "
             "REGLA CRÍTICA: Al final de CADA respuesta tuya en este modo, debes agregar exactamente este texto: [MODO_TRADUCTOR]."
         )
         msg = await query.message.reply_text("⏳ Configurando Modo Traductor...")
@@ -389,10 +422,17 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     if query.data == 'btn_examen_ingles':
         prompt = (
-            "Iniciamos el MODO JUEGO DE INGLÉS. Ve a la carpeta 'Idiomas/Ingles', lee mi vocabulario guardado, escoge una palabra al azar y haz lo siguiente: "
-            "1. NO me digas la categoría. Ponme una oración donde falte la palabra y dame 3 opciones de respuesta, o "
-            "2. Pregúntame cuál es el pasado perfecto de X verbo. "
-            "Sé creativo, hazlo como un juego de Trivia y espera mi respuesta."
+            "ESTA ES UNA INSTRUCCIÓN DE SISTEMA: Eres un JUEGO DE TRIVIA DE INGLÉS AMERICANO estricto y rápido. "
+            "Lee mi Vocabulario guardado en 'Idiomas/Ingles' en absoluto silencio (NUNCA menciones qué palabras leíste o qué estás haciendo). "
+            "Tu respuesta debe ir DIRECTO AL GRANO y tener EXACTAMENTE esta estructura:\n\n"
+            "🎲 ¡Trivia Time!\n\n"
+            "Pregunta: [Formula la pregunta con términos gramaticales precisos. Ej: '¿Cuál es el pasado simple del verbo X?', '¿Cuál es el pasado perfecto de Y?', o 'Completa la oración']. "
+            "NOTA: Si mi Vocabulario tiene muy pocas palabras para hacer preguntas variadas, INVENTA TÚ MISMO una pregunta sobre una palabra nueva en inglés (nivel intermedio) que no esté en mi vocabulario para enseñármela.\n\n"
+            "REGLAS:\n"
+            "1. CERO introducciones o saludos. Nada de '¡Entendido!'. Empieza directamente con '🎲 ¡Trivia Time!'.\n"
+            "2. Inventa 3 opciones de respuesta.\n"
+            "3. Para CADA opción, usa este formato estricto al final del mensaje: [BOTON: Opcion].\n"
+            "4. Agrega la etiqueta secreta al final: [MODO_TUTOR]."
         )
         msg = await query.message.reply_text("🎲 ¡Iniciando Trivia de Inglés!")
         await execute_gemini_flow(msg, user_id, prompt)
