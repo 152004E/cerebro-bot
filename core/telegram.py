@@ -18,7 +18,7 @@ import time
 
 user_requests_minute = []
 
-def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, current_requests: int = 0):
+def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, current_requests: int = 0, is_traductor: bool = False):
     """Genera el teclado dinámico con métricas en la fila 1 y botón guardar en la fila 2 (condicionado)."""
     global user_requests_minute
     current_time = time.time()
@@ -36,14 +36,42 @@ def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, curren
         metrics_text = f"⏱️ {latency:.1f}s | 🧠 {tokens_left/1000:.0f}k | ✉️ {MAX_DAILY_REQUESTS - current_requests}/{MAX_DAILY_REQUESTS}"
         keyboard.append([InlineKeyboardButton(metrics_text, callback_data='ignore')])
         
-    # Fila 2: Botón Guardar (solo si la respuesta es extensa y parece un debate)
-    if len(response_text) > 500:
+    # Fila 2: Botones especiales
+    if is_traductor:
+        keyboard.append([
+            InlineKeyboardButton("💾 Guardar Palabra", callback_data='save_vault_traductor'),
+            InlineKeyboardButton("❓ Explicar mejor", callback_data='btn_explicar_mejor')
+        ])
+    elif len(response_text) > 500:
         keyboard.append([InlineKeyboardButton("💾 Guardar Idea en Obsidian", callback_data='save_vault')])
         
     if not keyboard:
         return None
         
     return InlineKeyboardMarkup(keyboard)
+
+def get_main_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📂 Proyectos", callback_data='btn_proyectos'),
+         InlineKeyboardButton("📥 Pendientes", callback_data='btn_pendientes')],
+        [InlineKeyboardButton("🇬🇧 Modo Inglés", callback_data='btn_ingles'),
+         InlineKeyboardButton("➕ Más opciones", callback_data='btn_mas_opciones')]
+    ])
+
+def get_more_options_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎯 Sugerir Tarea", callback_data='btn_sugerir_tarea')],
+        [InlineKeyboardButton("🧹 Auditoría", callback_data='btn_auditoria')],
+        [InlineKeyboardButton("🎲 Examen Aleatorio", callback_data='btn_examen_menu')],
+        [InlineKeyboardButton("🔙 Volver al Inicio", callback_data='btn_volver_main')]
+    ])
+
+def get_exam_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💻 Desarrollo", callback_data='btn_examen_dev')],
+        [InlineKeyboardButton("🇬🇧 Examen Inglés", callback_data='btn_examen_ingles')],
+        [InlineKeyboardButton("🔙 Volver Atrás", callback_data='btn_mas_opciones')]
+    ])
 
 def format_for_telegram_html(text: str) -> str:
     """Convierte Markdown estándar al HTML seguro y limpio de Telegram."""
@@ -73,7 +101,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🧠 ¡Hola! Soy el Bot de tu Cerebro Digital.\n"
         "Envíame notas de voz o mensajes de texto y debatiremos tus ideas.\n\n"
-        "Para ver todo lo que puedo hacer, usa el comando /comandos."
+        "Para ver todo lo que puedo hacer, usa el comando /comandos.",
+        reply_markup=get_main_keyboard()
     )
 
 async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -187,10 +216,13 @@ async def execute_gemini_flow(msg, user_id, text, prefix_html=""):
         log_success(user_id, result["tokens"], result["latency"])
         stats = get_user_stats(user_id)
         
-        html_response = format_for_telegram_html(result["text"])
+        is_traductor = "[MODO_TRADUCTOR]" in result["text"]
+        clean_text = result["text"].replace("[MODO_TRADUCTOR]", "").strip()
+        
+        html_response = format_for_telegram_html(clean_text)
         final_msg = prefix_html + html_response
         
-        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], result["text"], stats['requests'])
+        keyboard = get_dynamic_keyboard(result["latency"], result["tokens"], clean_text, stats['requests'], is_traductor)
         
         try:
             if keyboard:
@@ -200,7 +232,7 @@ async def execute_gemini_flow(msg, user_id, text, prefix_html=""):
         except telegram.error.BadRequest as e:
             if "parse entities" in str(e).lower():
                 print("⚠️ [Telegram HTML Error] Falló el parseo. Enviando sin formato.")
-                await msg.edit_text(result["text"], reply_markup=keyboard)
+                await msg.edit_text(clean_text, reply_markup=keyboard)
             else:
                 raise
                 
@@ -266,8 +298,104 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    user_id = update.effective_user.id
     
     if query.data == 'ignore':
+        return
+        
+    # Navegación de menús
+    if query.data == 'btn_mas_opciones':
+        await query.message.edit_reply_markup(reply_markup=get_more_options_keyboard())
+        return
+    if query.data == 'btn_volver_main':
+        await query.message.edit_reply_markup(reply_markup=get_main_keyboard())
+        return
+    if query.data == 'btn_examen_menu':
+        await query.message.edit_reply_markup(reply_markup=get_exam_keyboard())
+        return
+
+    # Fase 1: Inteligencia RAG para Pendientes y Proyectos
+    if query.data == 'btn_pendientes':
+        prompt = (
+            "Revisa la carpeta '03-Bandeja_de_Entrada' en mi bóveda. "
+            "Hazme una lista de las notas que tengo pendientes (ignora Indice_Bandeja_Entrada). "
+            "Para cada nota, dame el título y un resumen muy breve de máximo 2 líneas de lo que trata."
+        )
+        msg = await query.message.reply_text("🧠 Analizando tus notas pendientes...")
+        await execute_gemini_flow(msg, user_id, prompt)
+        return
+
+    if query.data == 'btn_proyectos':
+        prompt = (
+            "Revisa mi bóveda y hazme una lista de mis proyectos activos (en '01-Proyectos'). "
+            "Para cada uno, dame solo el nombre y una descripción de máximo 1 línea."
+        )
+        msg = await query.message.reply_text("🧠 Analizando proyectos activos en la bóveda...")
+        await execute_gemini_flow(msg, user_id, prompt)
+        return
+
+    # Fase 3: Modo Traductor y Diccionario
+    if query.data == 'btn_ingles':
+        prompt = (
+            "Actúa en MODO TRADUCTOR. "
+            "Cuando te dé una palabra, sé EXTREMADAMENTE CONCISO (máximo 3 líneas). "
+            "1. SI ES VERBO: Categoría, significado, Presente/Pasado/Perfecto, y 1 ejemplo. "
+            "2. SI NO ES VERBO: Categoría, qué es, para qué se usa y 1 ejemplo. "
+            "3. PRONUNCIACIÓN: Al final, incluye siempre la pronunciación figurada (fácil de leer en español, ej: /wórd/). "
+            "REGLA CRÍTICA: Al final de CADA respuesta tuya en este modo, debes agregar exactamente este texto: [MODO_TRADUCTOR]."
+        )
+        msg = await query.message.reply_text("⏳ Configurando Modo Traductor...")
+        await execute_gemini_flow(msg, user_id, prompt)
+        return
+        
+    if query.data == 'btn_explicar_mejor':
+        prompt = "Explícame la palabra anterior de forma más detallada, con un ejemplo más sencillo y dame consejos para pronunciarla mejor. No olvides incluir el tag [MODO_TRADUCTOR] al final."
+        msg = await query.message.reply_text("🧠 Pensando una explicación más sencilla...")
+        await execute_gemini_flow(msg, user_id, prompt)
+        return
+
+    if query.data == 'save_vault_traductor':
+        await query.edit_message_text(text="⏳ Generando estructura para el diccionario de inglés...")
+        result = generate_final_markdown(user_id, is_traductor=True)
+        if not result:
+            log_error(user_id)
+            await query.edit_message_text(text="❌ No se pudo guardar la palabra o la sesión expiró.")
+            return
+            
+        log_success(user_id, result["tokens"], result["latency"])
+        markdown_text = result["text"]
+        await query.edit_message_text(text="🐙 Inyectando palabra en tu Vocabulario (Vía GitHub)...")
+        file_path = upload_to_obsidian(markdown_text)
+        
+        if file_path:
+            await query.edit_message_text(
+                text=f"✅ ¡Palabra guardada exitosamente en:\n<code>{html.escape(file_path)}</code>!", 
+                parse_mode='HTML'
+            )
+        else:
+            await query.edit_message_text(text="❌ Falló el append en GitHub.")
+        return
+
+    # Fase 4: Exámenes Aleatorios
+    if query.data == 'btn_examen_dev':
+        prompt = (
+            "Saca un concepto complejo al azar EXCLUSIVAMENTE de mis carpetas 'DevOps_y_Sistemas' o 'Desarrollo_y_Software'. "
+            "Quiero que actúes como un entrevistador técnico. Hazme 1 sola pregunta difícil sobre ese concepto sin darme la respuesta, "
+            "y espera a que te conteste para evaluarme."
+        )
+        msg = await query.message.reply_text("🧠 Preparando entrevista técnica...")
+        await execute_gemini_flow(msg, user_id, prompt)
+        return
+
+    if query.data == 'btn_examen_ingles':
+        prompt = (
+            "Iniciamos el MODO JUEGO DE INGLÉS. Ve a la carpeta 'Idiomas/Ingles', lee mi vocabulario guardado, escoge una palabra al azar y haz lo siguiente: "
+            "1. NO me digas la categoría. Ponme una oración donde falte la palabra y dame 3 opciones de respuesta, o "
+            "2. Pregúntame cuál es el pasado perfecto de X verbo. "
+            "Sé creativo, hazlo como un juego de Trivia y espera mi respuesta."
+        )
+        msg = await query.message.reply_text("🎲 ¡Iniciando Trivia de Inglés!")
+        await execute_gemini_flow(msg, user_id, prompt)
         return
         
     if query.data == 'save_vault':

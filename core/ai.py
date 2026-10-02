@@ -97,21 +97,38 @@ def chat_with_gemini(user_id: int, text: str) -> dict:
             return {"error": "rate_limit"}
         return None
 
-def generate_final_markdown(user_id: int) -> dict:
+def generate_final_markdown(user_id: int, is_traductor: bool = False) -> dict:
     """Resume la conversación en un Markdown final y devuelve las métricas."""
     try:
         if user_id not in chat_sessions:
             return None
         chat = chat_sessions[user_id]
-        prompt = (
-            "La sesión de ideación ha concluido y el usuario quiere guardar esta idea. "
-            "Con base en TODA la conversación que hemos tenido en este chat (tanto mis ideas como lo que investigaste en internet), "
-            "resume y estructura la idea desarrollada en un documento Markdown profesional listo para guardarse en Obsidian.\n"
-            "1. Añade un título (con #), viñetas para las ideas principales y negritas para resaltar conceptos clave.\n"
-            "2. Incluye una sección de 'Conexiones' si identificas que esta idea se relaciona con otros archivos de la bóveda.\n"
-            "3. Incluye una sección de 'Fuentes Externas' si usaste información de Google o Reddit durante el debate.\n"
-            "4. Devuelve SOLO el texto en formato Markdown sin presentaciones."
-        )
+        
+        if is_traductor:
+            prompt = (
+                "La sesión de ideación ha concluido. Resume la conversación en formato Markdown. "
+                "IMPORTANTE: Como esta sesión fue del MODO TRADUCTOR de Inglés, "
+                "extrae la palabra y devuélvela con la siguiente estructura exacta, SIN modificar la etiqueta YAML:\n"
+                "```yaml\n"
+                "target_file: 02-Conocimiento/Idiomas/Ingles/Vocabulario.md\n"
+                "file_mode: append\n"
+                "```\n"
+                "### [Categoría: Ej. Verbo / Sustantivo]\n"
+                "- **[Palabra]**: [Significado/Traducción] (/pronunciación/)\n"
+                "  - Detalles (Pasados o Usos): ...\n"
+                "  - Ejemplo: ..."
+            )
+        else:
+            prompt = (
+                "La sesión de ideación ha concluido y el usuario quiere guardar esta idea. "
+                "Con base en TODA la conversación que hemos tenido en este chat (tanto mis ideas como lo que investigaste en internet), "
+                "resume y estructura la idea desarrollada en un documento Markdown profesional listo para guardarse en Obsidian.\n"
+                "1. Añade un título (con #), viñetas para las ideas principales y negritas para resaltar conceptos clave.\n"
+                "2. Incluye una sección de 'Conexiones' si identificas que esta idea se relaciona con otros archivos de la bóveda.\n"
+                "3. Incluye una sección de 'Fuentes Externas' si usaste información de Google o Reddit durante el debate.\n"
+                "4. Devuelve SOLO el texto en formato Markdown sin presentaciones."
+            )
+            
         print(f"🧠 [Gemini Summarize] Generando documento final para usuario {user_id}...")
         
         start_time = time.time()
