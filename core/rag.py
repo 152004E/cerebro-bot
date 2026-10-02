@@ -26,7 +26,8 @@ def sync_vault_embeddings(client: genai.Client, vault_path: str):
 
     search_paths = [
         os.path.join(vault_path, "02-Conocimiento", "**", "*.md"),
-        os.path.join(vault_path, "01-Proyectos", "**", "*.md")
+        os.path.join(vault_path, "01-Proyectos", "**", "*.md"),
+        os.path.join(vault_path, "03-Bandeja_de_Entrada", "**", "*.md")
     ]
     
     current_files = {}

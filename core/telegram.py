@@ -72,10 +72,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         "🧠 ¡Hola! Soy el Bot de tu Cerebro Digital.\n"
-        "Ahora soy tu Asistente de Ideación. Envíame notas de voz o mensajes de texto. "
-        "Leeré el contexto de tu bóveda y debatiré contigo para desarrollar tus ideas.\n\n"
-        "Cuando hayamos concluido, pulsa el botón 'Guardar' para estructurar la conversación y enviarla a Obsidian.\n"
-        "Si quieres cambiar de tema sin guardar, usa el comando /limpiar."
+        "Envíame notas de voz o mensajes de texto y debatiremos tus ideas.\n\n"
+        "Para ver todo lo que puedo hacer, usa el comando /comandos."
     )
 
 async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83,9 +81,11 @@ async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from core.ai import chat_sessions
     if user_id in chat_sessions:
         del chat_sessions[user_id]
-        await update.message.reply_text("🧹 Memoria limpiada. ¡Listo para una nueva idea!")
+        await update.message.reply_text("🧹 Memoria limpiada.")
     else:
         await update.message.reply_text("La memoria ya estaba vacía.")
+        
+    await start(update, context)
 
 async def cmd_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
