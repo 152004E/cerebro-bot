@@ -1,6 +1,6 @@
 fastapi
 uvicorn
 python-telegram-bot
-google-generativeai
+google-genai
 PyGithub
 python-dotenv
