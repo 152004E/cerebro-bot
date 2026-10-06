@@ -10,6 +10,8 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+import os
+
 app = FastAPI(title="Cerebro Bot API")
 telegram_app = setup_bot()
 
@@ -17,6 +19,13 @@ telegram_app = setup_bot()
 async def on_startup():
     await telegram_app.initialize()
     await telegram_app.start()
+    
+    # Auto-configurar Webhook en Render
+    render_url = os.getenv("RENDER_EXTERNAL_URL")
+    if render_url:
+        webhook_url = f"{render_url}/webhook"
+        await telegram_app.bot.set_webhook(url=webhook_url)
+        print(f"✅ Webhook configurado automáticamente en: {webhook_url}")
 
 @app.post("/webhook")
 async def webhook(request: Request):
