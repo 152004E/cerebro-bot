@@ -36,7 +36,8 @@ def get_or_create_chat(user_id: int):
             model=MODEL_NAME,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.7
+                temperature=0.7,
+                tools=[{"google_search": {}}]
             )
         )
         chat_sessions[user_id] = chat
