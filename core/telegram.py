@@ -123,6 +123,7 @@ async def cmd_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "🛠️ <b>Comandos Disponibles</b>\n\n"
         "🔸 /comandos - Muestra esta lista de ayuda.\n"
+        "🔸 /searchs [tema] - Búsqueda profunda en internet (Reddit y fuentes fiables).\n"
         "🔸 /reintentar - Vuelve a enviar tu último mensaje (útil si hay error 503).\n"
         "🔸 /guardar - Guarda la conversación actual en Obsidian directamente.\n"
         "🔸 /estado - Muestra el estado del sistema, límite de mensajes y archivos indexados.\n"
@@ -195,6 +196,27 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⚠️ <b>Errores Hoy:</b> {stats.get('errors', 0)}\n"
     )
     await update.message.reply_text(texto, parse_mode='HTML')
+
+async def cmd_searchs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    query = " ".join(context.args)
+    
+    if not query:
+        await update.message.reply_text("❌ Debes escribir lo que quieres buscar. Ejemplo: /searchs mejores celulares 2026")
+        return
+        
+    msg = await update.message.reply_text(f"🔍 Investigando a fondo en Google y Reddit sobre: {query}...")
+    
+    prompt = (
+        f"INSTRUCCIÓN ESTRICTA DE INVESTIGACIÓN: Busca información sólida, confiable y ACTUALIZADA sobre: '{query}'.\n"
+        "REGLAS:\n"
+        "1. USA OBLIGATORIAMENTE tu herramienta de Google Search.\n"
+        "2. Prioriza buscar discusiones en Reddit ('site:reddit.com') y fuentes especializadas.\n"
+        "3. Estructura tu respuesta con 'Ideas Principales', 'Consenso de Usuarios (Reddit)', y al final pon una lista de las 'Fuentes Consultadas'.\n"
+        "4. Sé extremadamente técnico, directo y no alucines datos. Si no hay información reciente, dilo explícitamente."
+    )
+    
+    await execute_gemini_flow(msg, user_id, prompt)
 
 last_user_prompts = {}
 
@@ -479,6 +501,7 @@ def setup_bot():
     app.add_handler(CommandHandler("reintentar", cmd_reintentar))
     app.add_handler(CommandHandler("guardar", cmd_guardar))
     app.add_handler(CommandHandler("estado", cmd_estado))
+    app.add_handler(CommandHandler("searchs", cmd_searchs))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_button_callback))
