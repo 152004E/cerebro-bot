@@ -191,7 +191,7 @@ def research_with_grok(query: str, web_context: str) -> dict:
         start_time = time.time()
         chat_completion = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama3-8b-8192", 
+            model="llama-3.3-70b-versatile", 
             temperature=0.3,
         )
         latency = time.time() - start_time
