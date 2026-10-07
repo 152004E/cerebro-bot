@@ -202,21 +202,26 @@ async def cmd_searchs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
     
     if not query:
-        await update.message.reply_text("❌ Debes escribir lo que quieres buscar. Ejemplo: /searchs mejores celulares 2026")
+        await update.message.reply_text("❌ Debes escribir lo que quieres buscar. Ejemplo: /searchs mejores celulares")
         return
         
-    msg = await update.message.reply_text(f"🔍 Investigando a fondo en Google y Reddit sobre: {query}...")
+    msg = await update.message.reply_text(f"🔍 DuckDuckGo está buscando info reciente sobre: {query}...")
     
-    prompt = (
-        f"INSTRUCCIÓN ESTRICTA DE INVESTIGACIÓN: Busca información sólida, confiable y ACTUALIZADA sobre: '{query}'.\n"
-        "REGLAS:\n"
-        "1. USA OBLIGATORIAMENTE tu herramienta de Google Search.\n"
-        "2. Prioriza buscar discusiones en Reddit ('site:reddit.com') y fuentes especializadas.\n"
-        "3. Estructura tu respuesta con 'Ideas Principales', 'Consenso de Usuarios (Reddit)', y al final pon una lista de las 'Fuentes Consultadas'.\n"
-        "4. Sé extremadamente técnico, directo y no alucines datos. Si no hay información reciente, dilo explícitamente."
-    )
+    from core.ai import search_internet_ddg, research_with_grok
+    search_query = query if "site:" in query else f"{query} site:reddit.com"
     
-    await execute_gemini_flow(msg, user_id, prompt)
+    # 1. Búsqueda web (Agente Extractor)
+    web_context = search_internet_ddg(search_query)
+    
+    await msg.edit_text("🧠 Groq (Llama 3) analizando los resultados...")
+    
+    # 2. Resumen con Groq (Agente Investigador)
+    result = research_with_grok(query, web_context)
+    
+    lat_str = f"{result.get('latency', 0):.2f}s" if 'latency' in result else "N/A"
+    footer = f"\n\n<code>[⏱️ Groq: {lat_str}]</code>"
+    
+    await msg.edit_text(result["text"] + footer, parse_mode='HTML')
 
 last_user_prompts = {}
 

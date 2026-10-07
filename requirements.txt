@@ -5,3 +5,5 @@ google-genai
 PyGithub
 python-dotenv
 numpy
+duckduckgo-search
+groq

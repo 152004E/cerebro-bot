@@ -150,3 +150,55 @@ def generate_final_markdown(user_id: int, is_traductor: bool = False) -> dict:
     except Exception as e:
         print(f"❌ [Gemini Summarize Error] {e}")
         return None
+
+from duckduckgo_search import DDGS
+from groq import Groq
+from core.config import GROQ_API_KEY
+
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+def search_internet_ddg(query: str, max_results=5) -> str:
+    """Busca en DDG (último año) y formatea los resultados."""
+    try:
+        results = DDGS().text(query, timelimit='y', max_results=max_results)
+        if not results:
+            return "No se encontró información."
+        
+        context = "--- RESULTADOS DE INTERNET ---\n"
+        for r in results:
+            context += f"Título: {r.get('title')}\nInfo: {r.get('body')}\nURL: {r.get('href')}\n\n"
+        return context
+    except Exception as e:
+        print(f"Error DDG: {e}")
+        return "Error en el buscador web."
+
+def research_with_grok(query: str, web_context: str) -> dict:
+    """Agente Investigador impulsado por Groq (Llama 3)"""
+    if not groq_client:
+        return {"text": "⚠️ GROQ_API_KEY no configurada. Añádela en .env o Render."}
+        
+    prompt = (
+        f"Eres un investigador tecnológico estricto y directo. Analiza esta información de internet sobre '{query}':\n"
+        f"{web_context}\n\n"
+        "REGLAS:\n"
+        "1. Resume las ideas principales basándote SOLO en el contexto dado.\n"
+        "2. Identifica el consenso (qué opina la mayoría).\n"
+        "3. Lista las URL de las fuentes consultadas al final.\n"
+        "4. No uses saludos ni introducciones corporativas. Sé de estilo 'cavernícola' (directo y al grano)."
+    )
+    
+    try:
+        start_time = time.time()
+        chat_completion = groq_client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama3-8b-8192", 
+            temperature=0.3,
+        )
+        latency = time.time() - start_time
+        return {
+            "text": chat_completion.choices[0].message.content,
+            "latency": latency
+        }
+    except Exception as e:
+        print(f"Error Groq: {e}")
+        return {"text": "⚠️ Error conectando con el agente investigador (Groq)."}
