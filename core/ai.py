@@ -15,6 +15,21 @@ chat_sessions = {}
 
 # Sincronizar embeddings al iniciar el módulo
 vault_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../cerebro'))
+
+if not os.path.exists(vault_path):
+    print("☁️ [Nube] Bóveda local no encontrada. Clonando repositorio privado usando GITHUB_TOKEN...")
+    import subprocess
+    from core.config import GITHUB_TOKEN, GITHUB_REPO
+    clone_dir = "/tmp/cerebro_vault"
+    
+    repo_url = f"https://{GITHUB_TOKEN}@github.com/{GITHUB_REPO}.git"
+    if not os.path.exists(clone_dir):
+        subprocess.run(["git", "clone", "--depth", "1", repo_url, clone_dir])
+    else:
+        subprocess.run(["git", "pull"], cwd=clone_dir)
+        
+    vault_path = clone_dir
+
 try:
     rag.sync_vault_embeddings(client, vault_path)
 except Exception as e:
