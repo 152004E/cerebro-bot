@@ -472,16 +472,29 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if query.data == 'save_vault_traductor':
-        await query.edit_message_text(text="⏳ Generando estructura para el vocabulario de inglés...")
+        # Guardamos la ficha original para no borrar la pronunciación ni los ejemplos
+        original_card = query.message.text_html if hasattr(query.message, 'text_html') and query.message.text_html else html.escape(query.message.text)
+        
+        # Mostramos estado de carga manteniendo la ficha visible
+        try:
+            await query.edit_message_text(
+                text=f"{original_card}\n\n⏳ <i>Guardando en tu Vocabulario de Obsidian...</i>",
+                parse_mode='HTML'
+            )
+        except Exception:
+            pass
+
         result = generate_final_markdown(user_id, is_traductor=True)
         if not result:
             log_error(user_id)
-            await query.edit_message_text(text="❌ No se pudo guardar la palabra o la sesión expiró.")
+            await query.edit_message_text(
+                text=f"{original_card}\n\n❌ No se pudo guardar la palabra o la sesión expiró.",
+                parse_mode='HTML'
+            )
             return
             
         log_success(user_id, result["tokens"], result["latency"])
         markdown_text = result["text"]
-        await query.edit_message_text(text="🐙 Inyectando palabra en tu Vocabulario (Vía GitHub)...")
         file_path = upload_to_obsidian(markdown_text)
         
         # Mantenemos activo Teacher English
@@ -489,17 +502,31 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Salir de Teacher English", callback_data='btn_salir_modo')]
         ])
+        
         if file_path:
+            final_text = (
+                f"{original_card}\n\n"
+                f"────────────────────────\n"
+                f"✅ <b>Guardada exitosamente en:</b>\n<code>{html.escape(file_path)}</code>\n\n"
+                f"🇬🇧 <i>Sigo en Teacher English. Envíame la siguiente palabra o frase cuando gustes.</i>"
+            )
+            try:
+                await query.edit_message_text(
+                    text=final_text, 
+                    reply_markup=keyboard, 
+                    parse_mode='HTML'
+                )
+            except telegram.error.BadRequest:
+                await query.edit_message_text(
+                    text=f"{query.message.text}\n\n✅ Guardada en: {file_path}\n\n🇬🇧 Sigo en Teacher English.",
+                    reply_markup=keyboard
+                )
+        else:
             await query.edit_message_text(
-                text=(
-                    f"✅ ¡Palabra guardada exitosamente en:\n<code>{html.escape(file_path)}</code>!\n\n"
-                    "🇬🇧 <i>Sigo en Teacher English. Envíame la siguiente palabra o frase cuando gustes.</i>"
-                ), 
+                text=f"{original_card}\n\n❌ Falló el append en GitHub.", 
                 reply_markup=keyboard,
                 parse_mode='HTML'
             )
-        else:
-            await query.edit_message_text(text="❌ Falló el append en GitHub.", reply_markup=keyboard)
         return
 
     # Fase 4: Exámenes Aleatorios
