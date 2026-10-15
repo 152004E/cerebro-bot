@@ -31,3 +31,19 @@ Este archivo sirve para registrar problemas persistentes, decisiones arquitectó
 - Se configuró y activó un monitor externo en `cron-job.org` programado para enviar peticiones `GET` a `https://mi-cerebro-bot.onrender.com/` cada 10 minutos (`*/10 * * * *`).
 - La prueba en vivo arrojó respuesta inmediata (`200 OK`) y el microservicio quedó protegido contra suspensiones, activo 24/7 sin exceder la cuota gratuita de 750 horas de Render.
 - Registro técnico detallado en `docs/PLAN_KEEP_ALIVE.md`.
+
+---
+
+## 2026-10-15 (Tarde)
+**Tema:** Persistencia y Aislamiento de Modo en Teacher English
+**Problema/Decisión:**
+- Al presionar *"Guardar Palabra"* en Modo Inglés, la rutina llamaba a `del chat_sessions[user_id]`, borrando la memoria y expulsando al usuario al modo general de debate.
+- Al enviar la siguiente palabra (ej: *"outgoing"*), el motor RAG general inyectaba notas técnicas de la bóveda (webhooks salientes de arquitectura), confundiendo vocabulario cotidiano con discusión de software.
+- Al iniciar el modo, se invocaba innecesariamente a Gemini con un prompt vacío que renderizaba botones de guardado prematuros sin haber enviado aún ninguna palabra.
+**Solución/Acción:**
+- Se renombró el botón del menú principal a `🇬🇧 Teacher English`.
+- Se implementó una máquina de estados de usuario (`user_modes`) para mantener al usuario en `Teacher English` indefinidamente hasta orden explícita.
+- Se configuró bienvenida estática limpia (sin llamada a Gemini ni botones prematuros de guardado).
+- Se aisló `chat_with_gemini(..., mode="ingles")` omitiendo la búsqueda RAG de proyectos.
+- Se agregó salida controlada mediante botón inline `❌ Salir de Teacher English`, comando `/salir` y palabras clave (*"salir"*, *"exit"*).
+- Registro en `walkthrough.md`.

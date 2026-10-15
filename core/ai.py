@@ -77,20 +77,33 @@ def process_audio_to_text(audio_path: str) -> str:
         print(f"❌ [Gemini Audio Error] {e}")
         return None
 
-def chat_with_gemini(user_id: int, text: str) -> dict:
+def chat_with_gemini(user_id: int, text: str, mode: str = "normal") -> dict:
     """Envía un mensaje al historial de chat del usuario y devuelve métricas."""
     try:
         chat = get_or_create_chat(user_id)
         
-        # Búsqueda RAG
-        context = rag.search_vault(client, text)
-        
-        final_prompt = text
-        if context:
-            print(f"📚 Inyectando contexto RAG...")
-            final_prompt = f"--- Contexto recuperado de la Bóveda ---\n{context}\n\n--- Mensaje del Usuario ---\n{text}"
+        if mode == "ingles":
+            print(f"🇬🇧 [Teacher English] Procesando palabra o consulta sin interferencia RAG...")
+            final_prompt = (
+                f"[MODO TEACHER ENGLISH]\n"
+                f"Actúa como profesor y traductor de inglés americano conciso, dinámico y didáctico.\n"
+                f"Analiza la siguiente palabra o frase enviada por el usuario: '{text}'.\n\n"
+                f"ESTRUCTURA DE RESPUESTA OBLIGATORIA (máximo 4-5 líneas):\n"
+                f"• Categoría: [Verbo / Sustantivo / Adjetivo / Frase / etc.]\n"
+                f"• Significado: [Traducción y explicación clara en español]\n"
+                f"• Ejemplo: [1 oración natural en inglés con su traducción al español]\n"
+                f"• Pronunciación: [Pronunciación figurada fonética y consejos de sonido estilo americano]\n\n"
+                f"REGLA CRÍTICA: Termina SIEMPRE tu mensaje con la etiqueta exacta: [MODO_TRADUCTOR]"
+            )
         else:
-            print(f"🌐 Sin contexto RAG, confiando en conocimiento general/Google Search...")
+            # Búsqueda RAG normal para ideación
+            context = rag.search_vault(client, text)
+            final_prompt = text
+            if context:
+                print(f"📚 Inyectando contexto RAG...")
+                final_prompt = f"--- Contexto recuperado de la Bóveda ---\n{context}\n\n--- Mensaje del Usuario ---\n{text}"
+            else:
+                print(f"🌐 Sin contexto RAG, confiando en conocimiento general/Google Search...")
         
         start_time = time.time()
         response = chat.send_message(final_prompt)

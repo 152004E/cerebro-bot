@@ -18,6 +18,7 @@ import time
 
 user_requests_minute = []
 trivia_options = {}
+user_modes = {}
 
 def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, current_requests: int = 0, is_traductor: bool = False, is_tutor: bool = False, ai_buttons: list = None, user_id: int = None):
     """Genera el teclado dinámico con métricas en la fila 1 y botones condicionados en filas posteriores."""
@@ -40,10 +41,13 @@ def get_dynamic_keyboard(latency: float, tokens: int, response_text: str, curren
         for i, btn_text in enumerate(ai_buttons):
             keyboard.append([InlineKeyboardButton(f"🔸 {btn_text}", callback_data=f"ai_ans_{i}")])
             
-    if is_traductor:
+    if is_traductor or (user_id and user_modes.get(user_id) == "ingles"):
         keyboard.append([
             InlineKeyboardButton("💾 Guardar Palabra", callback_data='save_vault_traductor'),
             InlineKeyboardButton("❓ Explicar mejor", callback_data='btn_explicar_mejor')
+        ])
+        keyboard.append([
+            InlineKeyboardButton("❌ Salir de Teacher English", callback_data='btn_salir_modo')
         ])
     elif not is_tutor and len(response_text) > 500:
         keyboard.append([InlineKeyboardButton("💾 Guardar Idea en Obsidian", callback_data='save_vault')])
@@ -57,7 +61,7 @@ def get_main_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📂 Proyectos", callback_data='btn_proyectos'),
          InlineKeyboardButton("📥 Pendientes", callback_data='btn_pendientes')],
-        [InlineKeyboardButton("🇬🇧 Modo Inglés", callback_data='btn_ingles'),
+        [InlineKeyboardButton("🇬🇧 Teacher English", callback_data='btn_ingles'),
          InlineKeyboardButton("➕ Más opciones", callback_data='btn_mas_opciones')]
     ])
 
@@ -110,19 +114,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_limpiar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    user_modes[user_id] = "normal"
     from core.ai import chat_sessions
     if user_id in chat_sessions:
         del chat_sessions[user_id]
-        await update.message.reply_text("🧹 Memoria limpiada.")
+        await update.message.reply_text("🧹 Memoria limpiada y modos restablecidos.")
     else:
         await update.message.reply_text("La memoria ya estaba vacía.")
         
     await start(update, context)
 
+async def cmd_salir(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_modes[user_id] = "normal"
+    await update.message.reply_text(
+        "👋 Has salido de <b>Teacher English</b>. De vuelta a tu Cerebro Digital.",
+        reply_markup=get_main_keyboard(),
+        parse_mode='HTML'
+    )
+
 async def cmd_comandos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     texto = (
         "🛠️ <b>Comandos Disponibles</b>\n\n"
         "🔸 /comandos - Muestra esta lista de ayuda.\n"
+        "🔸 /salir - Sale de Teacher English y regresa al menú principal.\n"
         "🔸 /searchs [tema] - Búsqueda profunda en internet (Reddit y fuentes fiables).\n"
         "🔸 /reintentar - Vuelve a enviar tu último mensaje (útil si hay error 503).\n"
         "🔸 /guardar - Guarda la conversación actual en Obsidian directamente.\n"
@@ -225,14 +240,16 @@ async def cmd_searchs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 last_user_prompts = {}
 
-async def execute_gemini_flow(msg, user_id, text, prefix_html=""):
+async def execute_gemini_flow(msg, user_id, text, prefix_html="", mode=None):
     """Función central que llama a Gemini y actualiza el mensaje en Telegram."""
     global user_requests_minute
     last_user_prompts[user_id] = text
     
+    active_mode = mode or user_modes.get(user_id, "normal")
+    
     try:
         user_requests_minute.append(time.time())
-        result = chat_with_gemini(user_id, text)
+        result = chat_with_gemini(user_id, text, mode=active_mode)
         
         if not result:
             log_error(user_id)
@@ -246,7 +263,7 @@ async def execute_gemini_flow(msg, user_id, text, prefix_html=""):
         log_success(user_id, result["tokens"], result["latency"])
         stats = get_user_stats(user_id)
         
-        is_traductor = "[MODO_TRADUCTOR]" in result["text"]
+        is_traductor = "[MODO_TRADUCTOR]" in result["text"] or active_mode == "ingles"
         is_tutor = "[MODO_TUTOR]" in result["text"]
         ai_buttons = re.findall(r'\[BOTON:\s*(.*?)\]', result["text"])
         
@@ -282,10 +299,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if stats['requests'] >= MAX_DAILY_REQUESTS:
         await update.message.reply_text(f"⚠️ Has alcanzado tu límite de {MAX_DAILY_REQUESTS} respuestas por hoy.")
         return
-        
-    print(f"📩 ¡Mensaje de texto recibido! Iniciando debate...")
-    msg = await update.message.reply_text("🧠 Pensando y consultando la bóveda...")
-    raw_text = update.message.text
+
+    raw_text = update.message.text.strip()
+    
+    # Comprobar si pide salir de Teacher English
+    if raw_text.lower() in ["salir", "exit", "volver", "cancelar"]:
+        if user_modes.get(user_id) == "ingles":
+            user_modes[user_id] = "normal"
+            await update.message.reply_text(
+                "👋 Has salido de <b>Teacher English</b>. De vuelta a tu Cerebro Digital.",
+                reply_markup=get_main_keyboard(),
+                parse_mode='HTML'
+            )
+            return
+            
+    if user_modes.get(user_id) == "ingles":
+        print(f"🇬🇧 [Teacher English] Consulta de texto: '{raw_text}'")
+        msg = await update.message.reply_text("🇬🇧 Analizando con Teacher English...")
+    else:
+        print(f"📩 ¡Mensaje de texto recibido! Iniciando debate...")
+        msg = await update.message.reply_text("🧠 Pensando y consultando la bóveda...")
     
     await execute_gemini_flow(msg, user_id, raw_text)
 
@@ -318,9 +351,23 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_error(user_id)
             await msg.edit_text("❌ Hubo un error transcribiendo el audio.")
             return
+
+        # Comprobar si pide salir de Teacher English por voz
+        if transcription.strip().lower() in ["salir", "exit", "volver", "cancelar"]:
+            if user_modes.get(user_id) == "ingles":
+                user_modes[user_id] = "normal"
+                await msg.edit_text(
+                    "👋 Has salido de <b>Teacher English</b>. De vuelta a tu Cerebro Digital.",
+                    parse_mode='HTML'
+                )
+                await update.message.reply_text("Menú Principal:", reply_markup=get_main_keyboard())
+                return
             
         prefix_html = f"🗣️ <i>Tú dijiste: {html.escape(transcription)}</i>\n\n"
-        await msg.edit_text(prefix_html + "🧠 Pensando mi respuesta y consultando la bóveda...", parse_mode='HTML')
+        if user_modes.get(user_id) == "ingles":
+            await msg.edit_text(prefix_html + "🇬🇧 Analizando pronunciación y significado...", parse_mode='HTML')
+        else:
+            await msg.edit_text(prefix_html + "🧠 Pensando mi respuesta y consultando la bóveda...", parse_mode='HTML')
         
         await execute_gemini_flow(msg, user_id, transcription, prefix_html)
             
@@ -394,18 +441,28 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         await execute_gemini_flow(msg, user_id, prompt)
         return
 
-    # Fase 3: Modo Traductor y Diccionario
+    # Fase 3: Modo Teacher English
     if query.data == 'btn_ingles':
-        prompt = (
-            "Actúa en MODO TRADUCTOR DE INGLÉS AMERICANO. "
-            "Cuando te dé una palabra, sé EXTREMADAMENTE CONCISO (máximo 3 líneas). "
-            "1. SI ES VERBO: Categoría, significado, Presente/Pasado/Perfecto, y 1 ejemplo. "
-            "2. SI NO ES VERBO: Categoría, qué es, para qué se usa y 1 ejemplo. "
-            "3. PRONUNCIACIÓN: Al final, incluye siempre la pronunciación figurada ESTILO AMERICANO (ej. la 'r' fuerte, la 't' como 'd' suave, etc.). "
-            "REGLA CRÍTICA: Al final de CADA respuesta tuya en este modo, debes agregar exactamente este texto: [MODO_TRADUCTOR]."
+        user_modes[user_id] = "ingles"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Salir de Teacher English", callback_data='btn_salir_modo')]
+        ])
+        await query.message.reply_text(
+            "🇬🇧 <b>Teacher English Activo</b>\n\n"
+            "Envíame una palabra o frase en inglés (por texto o nota de voz) para analizarla, traducirla y explicar su pronunciación.\n\n"
+            "<i>Para salir de este modo en cualquier momento, presiona el botón abajo o escribe /salir.</i>",
+            reply_markup=keyboard,
+            parse_mode='HTML'
         )
-        msg = await query.message.reply_text("⏳ Configurando Modo Traductor...")
-        await execute_gemini_flow(msg, user_id, prompt)
+        return
+
+    if query.data == 'btn_salir_modo':
+        user_modes[user_id] = "normal"
+        await query.message.reply_text(
+            "👋 Has salido de <b>Teacher English</b>. De vuelta a tu Cerebro Digital.",
+            reply_markup=get_main_keyboard(),
+            parse_mode='HTML'
+        )
         return
         
     if query.data == 'btn_explicar_mejor':
@@ -415,7 +472,7 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     if query.data == 'save_vault_traductor':
-        await query.edit_message_text(text="⏳ Generando estructura para el diccionario de inglés...")
+        await query.edit_message_text(text="⏳ Generando estructura para el vocabulario de inglés...")
         result = generate_final_markdown(user_id, is_traductor=True)
         if not result:
             log_error(user_id)
@@ -427,13 +484,22 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(text="🐙 Inyectando palabra en tu Vocabulario (Vía GitHub)...")
         file_path = upload_to_obsidian(markdown_text)
         
+        # Mantenemos activo Teacher English
+        user_modes[user_id] = "ingles"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Salir de Teacher English", callback_data='btn_salir_modo')]
+        ])
         if file_path:
             await query.edit_message_text(
-                text=f"✅ ¡Palabra guardada exitosamente en:\n<code>{html.escape(file_path)}</code>!", 
+                text=(
+                    f"✅ ¡Palabra guardada exitosamente en:\n<code>{html.escape(file_path)}</code>!\n\n"
+                    "🇬🇧 <i>Sigo en Teacher English. Envíame la siguiente palabra o frase cuando gustes.</i>"
+                ), 
+                reply_markup=keyboard,
                 parse_mode='HTML'
             )
         else:
-            await query.edit_message_text(text="❌ Falló el append en GitHub.")
+            await query.edit_message_text(text="❌ Falló el append en GitHub.", reply_markup=keyboard)
         return
 
     # Fase 4: Exámenes Aleatorios
@@ -501,6 +567,7 @@ def setup_bot():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(TypeHandler(Update, debug_raw_update), group=-1)
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("salir", cmd_salir))
     app.add_handler(CommandHandler("limpiar", cmd_limpiar))
     app.add_handler(CommandHandler("comandos", cmd_comandos))
     app.add_handler(CommandHandler("reintentar", cmd_reintentar))
