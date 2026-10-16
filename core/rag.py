@@ -48,7 +48,7 @@ def sync_vault_embeddings(client: genai.Client, vault_path: str):
                     current_files[rel_path] = cache[rel_path]
                 else:
                     print(f"Generando embedding para: {rel_path}")
-                    clean_content = content[:15000] 
+                    clean_content = content[:3000]
                     
                     # Llamada a la API
                     try:
@@ -58,16 +58,26 @@ def sync_vault_embeddings(client: genai.Client, vault_path: str):
                         )
                         embedding = response.embeddings[0].values
                         
-                        current_files[rel_path] = {
+                        item_data = {
                             'hash': file_hash,
                             'content': clean_content,
                             'embedding': embedding
                         }
+                        current_files[rel_path] = item_data
+                        cache[rel_path] = item_data
                         needs_update = True
-                        time.sleep(1) # Pequeña pausa
+                        
+                        # Guardado progresivo en disco
+                        try:
+                            with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+                                json.dump(cache, f)
+                        except Exception:
+                            pass
+                            
+                        time.sleep(2) # Pausa preventiva para no exceder 30K TPM
                     except Exception as e:
                         if '429' in str(e):
-                            print(f"⏳ Límite de Google alcanzado (15 por minuto). Esperando 60 segundos para continuar...")
+                            print(f"⏳ Límite de Google alcanzado. Esperando 60 segundos para continuar...")
                             time.sleep(60)
                             try:
                                 response = client.models.embed_content(
@@ -75,12 +85,16 @@ def sync_vault_embeddings(client: genai.Client, vault_path: str):
                                     contents=clean_content,
                                 )
                                 embedding = response.embeddings[0].values
-                                current_files[rel_path] = {
+                                item_data = {
                                     'hash': file_hash,
                                     'content': clean_content,
                                     'embedding': embedding
                                 }
+                                current_files[rel_path] = item_data
+                                cache[rel_path] = item_data
                                 needs_update = True
+                                with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+                                    json.dump(cache, f)
                             except Exception as retry_e:
                                 print(f"Error en reintento para {rel_path}: {retry_e}")
                         else:
