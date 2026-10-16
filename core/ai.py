@@ -2,12 +2,18 @@ import os
 import time
 from google import genai
 from google.genai import types
+from groq import Groq
+from duckduckgo_search import DDGS
 
-from core.config import GEMINI_API_KEY, GEMINI_FAST_MODEL, GEMINI_PRO_MODEL
+from core.config import (
+    GEMINI_API_KEY, GEMINI_FAST_MODEL, GEMINI_PRO_MODEL,
+    GROQ_API_KEY, GROQ_MODEL, GROQ_AUDIO_MODEL
+)
 import core.rag as rag
 
-# Nuevo cliente moderno de Google GenAI
+# Clientes de IA
 client = genai.Client(api_key=GEMINI_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 # Diccionario en memoria para guardar las sesiones de chat por usuario
 chat_sessions = {}
@@ -57,10 +63,27 @@ def get_or_create_chat(user_id: int):
     return chat_sessions[user_id]
 
 def process_audio_to_text(audio_path: str) -> str:
-    """Sube el archivo de audio a Gemini y pide únicamente su transcripción literal."""
+    """Transcribe usando Groq Whisper v3 Turbo (~0.3s) con fallback a Gemini."""
+    # 1. Intento primario con Groq (Ultra rápido y 0 consumo de tokens en Google)
+    if groq_client:
+        try:
+            start_whisper = time.time()
+            with open(audio_path, "rb") as audio_file:
+                transcription = groq_client.audio.transcriptions.create(
+                    model=GROQ_AUDIO_MODEL,
+                    file=(os.path.basename(audio_path), audio_file.read()),
+                    response_format="text"
+                )
+            if transcription and transcription.strip():
+                lat = time.time() - start_whisper
+                print(f"⚡ [Groq Whisper] Transcrito en {lat:.2f}s: {transcription.strip()[:40]}...")
+                return transcription.strip()
+        except Exception as e_groq:
+            print(f"⚠️ [Groq Whisper Fallback] Error en Groq ({e_groq}), recurriendo a Gemini...")
+
+    # 2. Fallback a Google Gemini
     try:
-        print(f"📡 [Gemini Audio] Subiendo archivo usando nuevo SDK: {audio_path}")
-        # Subimos el archivo a la nube de Gemini temporalmente
+        print(f"📡 [Gemini Audio Fallback] Subiendo archivo a Google: {audio_path}")
         audio_file = client.files.upload(file=audio_path)
         prompt = "Escucha este audio y devuelve ÚNICAMENTE la transcripción exacta de lo que digo. No agregues nada más."
         
@@ -69,7 +92,6 @@ def process_audio_to_text(audio_path: str) -> str:
             contents=[prompt, audio_file]
         )
         
-        # Limpieza
         client.files.delete(name=audio_file.name)
         return response.text.strip()
     except Exception as e:
@@ -120,6 +142,36 @@ def chat_with_gemini(user_id: int, text: str, mode: str = "normal") -> dict:
     except Exception as e:
         error_msg = str(e)
         print(f"❌ [Gemini Chat Error] {error_msg}")
+        
+        # Fallback anticaídas inmediato a Groq
+        if groq_client:
+            try:
+                print(f"⚡ [Groq Chat Fallback] Activando {GROQ_MODEL} tras fallo en Gemini...")
+                start_fb = time.time()
+                sys_inst = (
+                    "Eres un asistente de ideación y conocimiento técnico directo y conciso. Estilo cavernícola (directo al grano, sin rodeos)."
+                    if mode != "ingles" else
+                    "Actúa como profesor y traductor de inglés americano conciso y didáctico. Termina siempre con [MODO_TRADUCTOR]."
+                )
+                groq_resp = groq_client.chat.completions.create(
+                    model=GROQ_MODEL,
+                    messages=[
+                        {"role": "system", "content": sys_inst},
+                        {"role": "user", "content": final_prompt}
+                    ],
+                    temperature=0.7
+                )
+                lat_fb = time.time() - start_fb
+                tok_fb = groq_resp.usage.total_tokens if hasattr(groq_resp, "usage") and groq_resp.usage else 0
+                return {
+                    "text": groq_resp.choices[0].message.content,
+                    "tokens": tok_fb,
+                    "latency": lat_fb,
+                    "fallback": "groq"
+                }
+            except Exception as e_groq_fb:
+                print(f"❌ [Groq Fallback Error] {e_groq_fb}")
+
         if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg.upper():
             return {"error": "rate_limit"}
         return None
@@ -189,12 +241,6 @@ def generate_final_markdown(user_id: int, is_traductor: bool = False) -> dict:
         print(f"❌ [Gemini Summarize Error] {e}")
         return None
 
-from duckduckgo_search import DDGS
-from groq import Groq
-from core.config import GROQ_API_KEY
-
-groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-
 def search_internet_ddg(query: str, max_results=5) -> str:
     """Busca en DDG (último año) y formatea los resultados."""
     try:
@@ -211,7 +257,7 @@ def search_internet_ddg(query: str, max_results=5) -> str:
         return "Error en el buscador web."
 
 def research_with_grok(query: str, web_context: str) -> dict:
-    """Agente Investigador impulsado por Groq (Llama 3)"""
+    """Agente Investigador impulsado por Groq"""
     if not groq_client:
         return {"text": "⚠️ GROQ_API_KEY no configurada. Añádela en .env o Render."}
         
@@ -229,7 +275,7 @@ def research_with_grok(query: str, web_context: str) -> dict:
         start_time = time.time()
         chat_completion = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile", 
+            model=GROQ_MODEL, 
             temperature=0.3,
         )
         latency = time.time() - start_time
