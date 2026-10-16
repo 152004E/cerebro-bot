@@ -193,6 +193,7 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import core.rag as rag
     import json
     import os
+    from core.config import GEMINI_FAST_MODEL, GEMINI_PRO_MODEL
     
     vault_size = 0
     if os.path.exists(rag.CACHE_FILE):
@@ -207,7 +208,8 @@ async def cmd_estado(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📊 <b>Estado del Sistema</b>\n\n"
         f"✉️ <b>Mensajes Hoy:</b> {stats['requests']} / {MAX_DAILY_REQUESTS}\n"
         f"📚 <b>Archivos Indexados (RAG):</b> {vault_size}\n"
-        f"🧠 <b>Modelo Activo:</b> gemini-3.5-flash-lite\n"
+        f"⚡ <b>Modelo Chat / Audio:</b> {GEMINI_FAST_MODEL}\n"
+        f"🧠 <b>Modelo Síntesis Bóveda:</b> {GEMINI_PRO_MODEL}\n"
         f"⚠️ <b>Errores Hoy:</b> {stats.get('errors', 0)}\n"
     )
     await update.message.reply_text(texto, parse_mode='HTML')
@@ -249,6 +251,10 @@ async def execute_gemini_flow(msg, user_id, text, prefix_html="", mode=None):
     
     try:
         user_requests_minute.append(time.time())
+        try:
+            await msg.chat.send_action(action="typing")
+        except Exception:
+            pass
         result = chat_with_gemini(user_id, text, mode=active_mode)
         
         if not result:

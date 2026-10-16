@@ -3,12 +3,11 @@ import time
 from google import genai
 from google.genai import types
 
-from core.config import GEMINI_API_KEY
+from core.config import GEMINI_API_KEY, GEMINI_FAST_MODEL, GEMINI_PRO_MODEL
 import core.rag as rag
 
 # Nuevo cliente moderno de Google GenAI
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = 'gemini-3.5-flash-lite'
 
 # Diccionario en memoria para guardar las sesiones de chat por usuario
 chat_sessions = {}
@@ -48,7 +47,7 @@ def get_or_create_chat(user_id: int):
         )
         
         chat = client.chats.create(
-            model=MODEL_NAME,
+            model=GEMINI_FAST_MODEL,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=0.7
@@ -66,7 +65,7 @@ def process_audio_to_text(audio_path: str) -> str:
         prompt = "Escucha este audio y devuelve ÚNICAMENTE la transcripción exacta de lo que digo. No agregues nada más."
         
         response = client.models.generate_content(
-            model=MODEL_NAME,
+            model=GEMINI_FAST_MODEL,
             contents=[prompt, audio_file]
         )
         
@@ -157,10 +156,21 @@ def generate_final_markdown(user_id: int, is_traductor: bool = False) -> dict:
                 "4. Devuelve SOLO el texto en formato Markdown sin presentaciones."
             )
             
-        print(f"🧠 [Gemini Summarize] Generando documento final para usuario {user_id}...")
+        print(f"🧠 [Gemini Summarize] Generando documento final con {GEMINI_PRO_MODEL} para usuario {user_id}...")
         
         start_time = time.time()
-        response = chat.send_message(prompt)
+        try:
+            history = chat.get_history()
+            contents = list(history) + [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+            response = client.models.generate_content(
+                model=GEMINI_PRO_MODEL,
+                contents=contents,
+                config=types.GenerateContentConfig(temperature=0.2)
+            )
+        except Exception as e_pro:
+            print(f"⚠️ [Gemini Pro Fallback] Falló {GEMINI_PRO_MODEL} ({e_pro}), usando chat fallback...")
+            response = chat.send_message(prompt)
+            
         latency = time.time() - start_time
         
         tokens = 0
