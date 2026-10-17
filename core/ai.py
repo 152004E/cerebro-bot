@@ -176,7 +176,7 @@ def chat_with_gemini(user_id: int, text: str, mode: str = "normal") -> dict:
             return {"error": "rate_limit"}
         return None
 
-def generate_final_markdown(user_id: int, is_traductor: bool = False) -> dict:
+def generate_final_markdown(user_id: int, is_traductor: bool = False, target_file_override: Optional[str] = None) -> dict:
     """Resume la conversación en un Markdown final y devuelve las métricas."""
     try:
         if user_id not in chat_sessions:
@@ -184,15 +184,16 @@ def generate_final_markdown(user_id: int, is_traductor: bool = False) -> dict:
         chat = chat_sessions[user_id]
         
         if is_traductor:
+            target_path = target_file_override or "02-Conocimiento/Idiomas/Ingles/Categorias/Verbos.md"
             prompt = (
                 "La sesión de ideación ha concluido. Resume la conversación en formato Markdown. "
                 "IMPORTANTE: Como esta sesión fue del MODO TRADUCTOR de Inglés, "
-                "extrae la palabra y devuélvela con la siguiente estructura exacta, SIN modificar la etiqueta YAML:\n"
+                "extrae la palabra y devuélvela con la siguiente estructura exacta:\n"
                 "```yaml\n"
-                "target_file: 02-Conocimiento/Idiomas/Ingles/Vocabulario.md\n"
+                f"target_file: {target_path}\n"
                 "file_mode: append\n"
                 "```\n"
-                "### [Categoría: Ej. Verbo / Sustantivo]\n"
+                "### [Categoría: Ej. Verbo / Sustantivo / Adjetivo / Adverbio / Phrasal Verb]\n"
                 "- **[Palabra]**: [Significado/Traducción] (/pronunciación/)\n"
                 "  - Detalles (Pasados o Usos): ...\n"
                 "  - Ejemplo: ..."

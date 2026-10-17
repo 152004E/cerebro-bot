@@ -1,9 +1,10 @@
 import html
+import re
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 import telegram.error
 from telegram.ext import ContextTypes
 
-from core.telegram.state import trivia_options, user_modes
+from core.telegram.state import trivia_options, user_modes, last_user_prompts
 from core.telegram.ui import get_main_keyboard, get_more_options_keyboard, get_exam_keyboard
 from core.telegram.handlers import execute_gemini_flow
 from core.ai import generate_final_markdown
@@ -106,18 +107,61 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         await execute_gemini_flow(msg, user_id, prompt)
         return
 
-    if query.data == 'save_vault_traductor':
+    if query.data == 'cancel_save_traductor':
+        user_modes[user_id] = "ingles"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Salir de Teacher English", callback_data='btn_salir_modo')]
+        ])
+        await query.message.reply_text(
+            "👍 <b>Operación cancelada.</b> Se mantiene la definición existente en tu vocabulario.\n\n🇬🇧 <i>Envíame otra palabra cuando gustes.</i>",
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+        return
+
+    if query.data in ['save_vault_traductor', 'confirm_save_traductor']:
+        is_override = (query.data == 'confirm_save_traductor')
         original_card = query.message.text_html if hasattr(query.message, 'text_html') and query.message.text_html else html.escape(query.message.text)
+        
+        last_word = last_user_prompts.get(user_id, "").strip()
+        
+        from core.srs import find_word_in_categories, get_category_target_file, get_all_cards
+        
+        # 1. Comprobación antiduplicados previa
+        if not is_override and last_word:
+            existing = find_word_in_categories(last_word)
+            if existing:
+                card, cat_file = existing
+                dupe_warning = (
+                    f"⚠️ <b>¡Atención! La palabra \"{html.escape(card.word)}\" YA existe en tu vocabulario:</b>\n\n"
+                    f"📁 <b>Archivo actual:</b> <code>{html.escape(cat_file)}</code>\n"
+                    f"• <b>Categoría:</b> {html.escape(card.category)}\n"
+                    f"• <b>Significado:</b> {html.escape(card.meaning)}\n"
+                    f"• <b>Ejemplo:</b> <i>\"{html.escape(card.example)}\"</i>\n\n"
+                    f"¿Deseas reemplazarla con la nueva explicación o cancelar para no duplicar?"
+                )
+                keyboard_dupe = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Reemplazar / Actualizar", callback_data='confirm_save_traductor')],
+                    [InlineKeyboardButton("❌ Cancelar (Mantener actual)", callback_data='cancel_save_traductor')]
+                ])
+                await query.message.reply_text(dupe_warning, reply_markup=keyboard_dupe, parse_mode='HTML')
+                return
+
+        # 2. Detectar categoría del mensaje para enrutamiento limpio
+        raw_msg = query.message.text or ""
+        cat_match = re.search(r'Categoría:\s*([^\n]+)', raw_msg, re.IGNORECASE)
+        cat_raw = cat_match.group(1).strip() if cat_match else "General"
+        target_file_rel, cat_filename = get_category_target_file(cat_raw, last_word)
         
         try:
             await query.edit_message_text(
-                text=f"{original_card}\n\n⏳ <i>Guardando en tu Vocabulario de Obsidian...</i>",
+                text=f"{original_card}\n\n⏳ <i>Guardando en Categorias/{cat_filename}...</i>",
                 parse_mode='HTML'
             )
         except Exception:
             pass
 
-        result = generate_final_markdown(user_id, is_traductor=True)
+        result = generate_final_markdown(user_id, is_traductor=True, target_file_override=target_file_rel)
         if not result:
             log_error(user_id)
             await query.edit_message_text(
@@ -129,6 +173,12 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
         log_success(user_id, result["tokens"], result["latency"])
         markdown_text = result["text"]
         file_path = upload_to_obsidian(markdown_text)
+        
+        # Forzar actualización inmediata del diccionario SRS
+        try:
+            get_all_cards(force_reload=True)
+        except Exception:
+            pass
         
         user_modes[user_id] = "ingles"
         keyboard = InlineKeyboardMarkup([

@@ -14,23 +14,35 @@ BOX_INTERVALS = {
     5: 30   # 30 días (Dominada)
 }
 
-# Caché en memoria de tarjetas y slug lookup
+import os
+from core.srs.parser import load_vocabulario_from_vault, get_vocabulario_path
+
+# Caché en memoria de tarjetas y slug lookup con control de mtime
 _ALL_CARDS_CACHE: List[WordCard] = []
 _CARDS_BY_SLUG: Dict[str, WordCard] = {}
+_LAST_MTIME: float = 0.0
 
-def get_all_cards() -> List[WordCard]:
-    """Retorna todas las tarjetas parseadas de Vocabulario.md."""
-    global _ALL_CARDS_CACHE, _CARDS_BY_SLUG
-    if not _ALL_CARDS_CACHE:
+def get_all_cards(force_reload: bool = False) -> List[WordCard]:
+    """
+    Retorna todas las tarjetas parseadas de Vocabulario.md.
+    Si se agregaron palabras nuevas al archivo, lo detecta automáticamente.
+    """
+    global _ALL_CARDS_CACHE, _CARDS_BY_SLUG, _LAST_MTIME
+    
+    path = get_vocabulario_path()
+    current_mtime = os.path.getmtime(path) if (path and os.path.exists(path)) else 0.0
+    
+    if force_reload or not _ALL_CARDS_CACHE or (current_mtime > _LAST_MTIME):
         _ALL_CARDS_CACHE = load_vocabulario_from_vault()
         _CARDS_BY_SLUG = {c.slug: c for c in _ALL_CARDS_CACHE}
+        _LAST_MTIME = current_mtime
+        
     return _ALL_CARDS_CACHE
 
 def get_card_by_slug(slug: str) -> Optional[WordCard]:
     """Busca una tarjeta por su slug para comandos rápidos /pista_<slug>."""
     global _CARDS_BY_SLUG
-    if not _CARDS_BY_SLUG:
-        get_all_cards()
+    get_all_cards()
     return _CARDS_BY_SLUG.get(slug.lower().strip())
 
 def get_due_cards(user_id: int, count: int = 8) -> List[WordCard]:
