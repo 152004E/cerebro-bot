@@ -74,8 +74,58 @@ def get_exam_keyboard() -> InlineKeyboardMarkup:
     """Retorna el menú de selección de exámenes técnicos y de idiomas."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💻 Desarrollo", callback_data='btn_examen_dev')],
-        [InlineKeyboardButton("🇬🇧 Examen Inglés", callback_data='btn_examen_ingles')],
+        [InlineKeyboardButton("🇬🇧 Entrenador SRS (Duolingo)", callback_data='btn_srs_hub')],
         [InlineKeyboardButton("🔙 Volver Atrás", callback_data='btn_mas_opciones')]
+    ])
+
+def get_srs_hub_keyboard() -> InlineKeyboardMarkup:
+    """Retorna el menú principal del Entrenador de Inglés con Repetición Espaciada."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎲 Trivia de Opciones (SRS)", callback_data='btn_srs_start_trivia')],
+        [InlineKeyboardButton("✍️ Reto de Escritura", callback_data='btn_srs_start_writing')],
+        [InlineKeyboardButton("🎴 Flashcards Inteligentes", callback_data='btn_srs_start_flashcards')],
+        [InlineKeyboardButton("📊 Mi Progreso (XP y Racha)", callback_data='btn_srs_stats')],
+        [InlineKeyboardButton("🔙 Volver al Menú Principal", callback_data='btn_volver_main')]
+    ])
+
+def get_srs_choice_keyboard(options: List[str], slug: str) -> InlineKeyboardMarkup:
+    """Genera botones para las 4 opciones de trivia y botón de pista."""
+    keyboard = []
+    letters = ["A", "B", "C", "D"]
+    for i, opt in enumerate(options):
+        prefix = letters[i] if i < len(letters) else str(i+1)
+        keyboard.append([InlineKeyboardButton(f"{prefix}) {opt}", callback_data=f"srs_ans_{i}")])
+        
+    keyboard.append([
+        InlineKeyboardButton("💡 Ver Pista Completa", callback_data=f"srs_hint_{slug}")
+    ])
+    keyboard.append([
+        InlineKeyboardButton("⏹️ Salir de la Sesión", callback_data='btn_srs_hub')
+    ])
+    return InlineKeyboardMarkup(keyboard)
+
+def get_srs_flashcard_keyboard(slug: str) -> InlineKeyboardMarkup:
+    """Botones de autoevaluación Leitner para Flashcards."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔴 Otra vez", callback_data="srs_rate_again"),
+         InlineKeyboardButton("🟡 Difícil", callback_data="srs_rate_hard")],
+        [InlineKeyboardButton("🟢 Bien", callback_data="srs_rate_good"),
+         InlineKeyboardButton("🚀 Fácil", callback_data="srs_rate_easy")],
+        [InlineKeyboardButton("💡 Ficha Teacher", callback_data=f"srs_hint_{slug}"),
+         InlineKeyboardButton("⏹️ Salir", callback_data="btn_srs_hub")]
+    ])
+
+def get_srs_hint_keyboard() -> InlineKeyboardMarkup:
+    """Botón tras consultar una pista de Teacher English."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🆗 Entendido, Siguiente ➡️", callback_data='srs_next')]
+    ])
+
+def get_srs_feedback_keyboard() -> InlineKeyboardMarkup:
+    """Botón tras responder para avanzar a la siguiente pregunta."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➡️ Siguiente Pregunta", callback_data='srs_next'),
+         InlineKeyboardButton("⏹️ Salir", callback_data='btn_srs_hub')]
     ])
 
 def format_for_telegram_html(text: str) -> str:

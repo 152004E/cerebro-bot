@@ -149,3 +149,41 @@ async def cmd_searchs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     footer = f"\n\n<code>[⏱️ Groq: {lat_str}]</code>"
     
     await msg.edit_text(result["text"] + footer, parse_mode='HTML')
+
+async def cmd_study(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Abre el Entrenador de Inglés con Repetición Espaciada (Duolingo Hub)."""
+    from core.telegram.ui import get_srs_hub_keyboard
+    from core.srs.engine import get_user_srs_summary
+    
+    user_id = update.effective_user.id
+    summary = get_user_srs_summary(user_id)
+    
+    texto = (
+        "🇬🇧 <b>Entrenador de Inglés Inteligente (SRS)</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🏆 <b>Nivel:</b> {summary['level']} | ⭐ <b>XP:</b> {summary['total_xp']}\n"
+        f"🔥 <b>Racha:</b> {summary['streak']} días | 📖 <b>Dominadas:</b> {summary['mastered']}/{summary['total_cards']}\n\n"
+        "¿Qué deseas practicar hoy?"
+    )
+    await update.message.reply_text(texto, reply_markup=get_srs_hub_keyboard(), parse_mode='HTML')
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra estadísticas detalladas del progreso en inglés."""
+    from core.srs.engine import get_user_srs_summary
+    user_id = update.effective_user.id
+    s = get_user_srs_summary(user_id)
+    
+    texto = (
+        "📊 <b>Tus Estadísticas de Inglés</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⭐ <b>Total XP:</b> {s['total_xp']} (Nivel {s['level']})\n"
+        f"🔥 <b>Racha Actual:</b> {s['streak']} días consecutivos\n"
+        f"📚 <b>Vocabulario Total:</b> {s['total_cards']} palabras\n"
+        f"🟢 <b>Dominadas (Caja 5):</b> {s['mastered']}\n"
+        f"🟡 <b>En Aprendizaje (Cajas 1-4):</b> {s['learning']}\n"
+        f"⚪ <b>Nuevas por Repasar:</b> {s['new']}\n"
+        f"🔄 <b>Total Repasos Realizados:</b> {s['total_reviews']}\n\n"
+        "<i>Usa /study para iniciar una sesión de repaso.</i>"
+    )
+    await update.message.reply_text(texto, parse_mode='HTML')
+

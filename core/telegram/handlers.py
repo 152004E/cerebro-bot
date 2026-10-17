@@ -82,6 +82,58 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     raw_text = update.message.text.strip()
     
+    # 1. Interceptar comandos azules de pista /pista_<slug>
+    if raw_text.startswith("/pista_") or raw_text.startswith("/p_"):
+        slug = raw_text.split()[0].replace("/pista_", "").replace("/p_", "").strip()
+        from core.srs.engine import get_card_by_slug
+        from core.srs.games import format_teacher_card
+        from core.telegram.ui import get_srs_hint_keyboard
+        
+        card = get_card_by_slug(slug)
+        if card:
+            card_text = format_teacher_card(card)
+            await update.message.reply_text(card_text, reply_markup=get_srs_hint_keyboard(), parse_mode='HTML')
+            return
+        else:
+            await update.message.reply_text(f"⚠️ No encontré la ficha de vocabulario para '{html.escape(slug)}'.", reply_markup=get_srs_hint_keyboard())
+            return
+
+    # 2. Interceptar respuesta de Reto de Escritura SRS si está activo
+    from core.telegram.state import user_srs_session
+    sess = user_srs_session.get(user_id)
+    if sess and sess.get("mode") == "writing" and sess.get("waiting_input") and "current_card" in sess:
+        card = sess["current_card"]
+        from core.srs.games import evaluate_writing_answer
+        from core.srs.engine import record_answer
+        from core.telegram.ui import get_srs_feedback_keyboard
+        
+        is_correct, kind = evaluate_writing_answer(card.word, raw_text)
+        if is_correct:
+            xp, box, interval = record_answer(user_id, card.slug, "good")
+            feedback = (
+                f"🎉 <b>¡CORRECTO! (+{xp} XP)</b> ⭐\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Escribiste: <b>{html.escape(raw_text)}</b> ✅\n"
+                f"Palabra: <b>{card.word}</b> <code>{card.pronunciation}</code>\n"
+                f"📖 <i>{card.meaning}</i>\n\n"
+                f"📦 <i>Subió a Caja Leitner {box} (Repaso en {interval} días)</i>"
+            )
+        else:
+            xp, box, interval = record_answer(user_id, card.slug, "again")
+            feedback = (
+                f"❌ <b>Casi:</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Tú escribiste: <i>{html.escape(raw_text)}</i>\n"
+                f"La palabra correcta es: <b>{card.word}</b> <code>{card.pronunciation}</code>\n"
+                f"📖 <i>{card.meaning}</i>\n"
+                f"💡 Ejemplo: <i>\"{card.example}\"</i>\n\n"
+                f"📦 <i>Vuelve a Caja 1 para afianzarla (+{xp} XP)</i>"
+            )
+        
+        sess["waiting_input"] = False
+        await update.message.reply_text(feedback, reply_markup=get_srs_feedback_keyboard(), parse_mode='HTML')
+        return
+        
     # Comprobar si pide salir de Teacher English
     if raw_text.lower() in ["salir", "exit", "volver", "cancelar"]:
         if user_modes.get(user_id) == "ingles":

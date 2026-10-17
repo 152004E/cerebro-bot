@@ -47,3 +47,22 @@ Este archivo sirve para registrar problemas persistentes, decisiones arquitectó
 - Se aisló `chat_with_gemini(..., mode="ingles")` omitiendo la búsqueda RAG de proyectos.
 - Se agregó salida controlada mediante botón inline `❌ Salir de Teacher English`, comando `/salir` y palabras clave (*"salir"*, *"exit"*).
 - Registro en `walkthrough.md`.
+
+---
+
+## 2026-10-16
+**Tema:** Migración a Google AI Studio, Arquitectura Híbrida y Fallback de Groq
+**Problema/Decisión:**
+- Se requería migrar el uso de modelos a Google AI Studio garantizando cero sobrecostos y máxima velocidad de respuesta.
+- La cuota de embeddings de Google se saturaba durante la sincronización inicial del RAG.
+- El archivo `core/telegram.py` se había vuelto un monolito de más de 600 líneas difícil de mantener.
+- La transcripción con modelos generales de Gemini agregaba latencia evitable.
+**Solución/Acción:**
+- Se configuró la clave de Google AI Studio con balance prepago seguro en $0 COP para garantizar 0 cobros inesperados.
+- Se calibraron los modelos: `gemini-3.5-flash-lite` para debate/chat (~0.78s) y `gemini-3.5-flash` para síntesis Markdown a Obsidian.
+- En `core/rag.py`: se redujo el chunk a 3,000 caracteres, con guardado incremental por archivo y delay de 2s para respetar el límite de 30K TPM de Google.
+- Se desacopló `core/telegram.py` en el paquete modular `core/telegram/` (`state.py`, `ui.py`, `commands.py`, `handlers.py`, `callbacks.py`).
+- Se integró Groq para transcripción de audio con `whisper-large-v3-turbo` (~0.3s) y agente de investigación web con `openai/gpt-oss-120b`.
+- Se configuró fallback automático a Groq ante cualquier fallo o saturación (429/503) de Gemini.
+- Cierre del plan técnico `docs/PLAN_GEMINI_PRO_API.md`.
+

@@ -214,3 +214,236 @@ async def handle_button_callback(update: Update, context: ContextTypes.DEFAULT_T
             )
         else:
             await query.edit_message_text(text="❌ Falló la subida a GitHub.")
+        return
+
+    # ==========================================================
+    # 5. SISTEMA SRS Y MINIJUEGOS DE INGLÉS (DUOLINGO CON PODERES)
+    # ==========================================================
+    from core.telegram.state import user_srs_session
+    from core.telegram.ui import (
+        get_srs_hub_keyboard, get_srs_choice_keyboard,
+        get_srs_flashcard_keyboard, get_srs_hint_keyboard,
+        get_srs_feedback_keyboard
+    )
+    from core.srs import (
+        get_due_cards, get_card_by_slug, record_answer,
+        get_user_srs_summary, build_trivia_question,
+        build_writing_challenge, build_flashcard, format_teacher_card
+    )
+
+    if query.data in ['btn_srs_hub', 'btn_examen_ingles']:
+        summary = get_user_srs_summary(user_id)
+        texto = (
+            "🇬🇧 <b>Entrenador de Inglés Inteligente (SRS)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🏆 <b>Nivel:</b> {summary['level']} | ⭐ <b>XP:</b> {summary['total_xp']}\n"
+            f"🔥 <b>Racha:</b> {summary['streak']} días | 📖 <b>Dominadas:</b> {summary['mastered']}/{summary['total_cards']}\n\n"
+            "Elige tu modo de práctica:"
+        )
+        await query.message.reply_text(texto, reply_markup=get_srs_hub_keyboard(), parse_mode='HTML')
+        return
+
+    if query.data == 'btn_srs_stats':
+        s = get_user_srs_summary(user_id)
+        texto = (
+            "📊 <b>Tus Estadísticas de Inglés</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⭐ <b>Total XP:</b> {s['total_xp']} (Nivel {s['level']})\n"
+            f"🔥 <b>Racha Actual:</b> {s['streak']} días consecutivos\n"
+            f"📚 <b>Vocabulario Total:</b> {s['total_cards']} palabras\n"
+            f"🟢 <b>Dominadas (Caja 5):</b> {s['mastered']}\n"
+            f"🟡 <b>En Aprendizaje (Cajas 1-4):</b> {s['learning']}\n"
+            f"⚪ <b>Nuevas por Repasar:</b> {s['new']}\n"
+            f"🔄 <b>Total Repasos Realizados:</b> {s['total_reviews']}"
+        )
+        await query.message.reply_text(texto, reply_markup=get_srs_hub_keyboard(), parse_mode='HTML')
+        return
+
+    if query.data == 'btn_srs_start_trivia':
+        due = get_due_cards(user_id, count=6)
+        user_srs_session[user_id] = {
+            "mode": "trivia",
+            "queue": due,
+            "index": 0,
+            "current_card": due[0] if due else None
+        }
+        if not due:
+            await query.message.reply_text("✅ ¡No tienes palabras pendientes por hoy! Excelente trabajo.", reply_markup=get_srs_hub_keyboard())
+            return
+            
+        q = build_trivia_question(due[0])
+        user_srs_session[user_id]["current_game"] = q
+        await query.message.reply_text(
+            q["text"], 
+            reply_markup=get_srs_choice_keyboard(q["options"], due[0].slug),
+            parse_mode='HTML'
+        )
+        return
+
+    if query.data == 'btn_srs_start_writing':
+        due = get_due_cards(user_id, count=6)
+        if not due:
+            await query.message.reply_text("✅ ¡Vocabulario al día!", reply_markup=get_srs_hub_keyboard())
+            return
+            
+        user_srs_session[user_id] = {
+            "mode": "writing",
+            "queue": due,
+            "index": 0,
+            "current_card": due[0],
+            "waiting_input": True
+        }
+        w = build_writing_challenge(due[0])
+        user_srs_session[user_id]["current_game"] = w
+        await query.message.reply_text(w["text"], parse_mode='HTML')
+        return
+
+    if query.data == 'btn_srs_start_flashcards':
+        due = get_due_cards(user_id, count=6)
+        if not due:
+            await query.message.reply_text("✅ ¡Vocabulario al día!", reply_markup=get_srs_hub_keyboard())
+            return
+            
+        user_srs_session[user_id] = {
+            "mode": "flashcard",
+            "queue": due,
+            "index": 0,
+            "current_card": due[0]
+        }
+        fc = build_flashcard(due[0])
+        user_srs_session[user_id]["current_game"] = fc
+        await query.message.reply_text(
+            fc["text"], 
+            reply_markup=get_srs_flashcard_keyboard(due[0].slug),
+            parse_mode='HTML'
+        )
+        return
+
+    if query.data.startswith('srs_ans_'):
+        idx = int(query.data.replace('srs_ans_', ''))
+        sess = user_srs_session.get(user_id)
+        if not sess or "current_game" not in sess:
+            await query.message.reply_text("⚠️ Sesión expirada. Inicia una nueva con /study.")
+            return
+            
+        q = sess["current_game"]
+        card = sess["current_card"]
+        is_correct = (idx == q["correct_idx"])
+        chosen_opt = q["options"][idx] if idx < len(q["options"]) else ""
+        
+        if is_correct:
+            xp, box, interval = record_answer(user_id, card.slug, "good")
+            feedback = (
+                f"🎉 <b>¡CORRECTO! (+{xp} XP)</b> ⭐\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Elegiste: <b>{chosen_opt}</b> ✅\n"
+                f"Palabra: <b>{card.word}</b> <code>{card.pronunciation}</code>\n"
+                f"📖 {card.meaning}\n\n"
+                f"📦 <i>Avanza a Caja Leitner {box} (Próximo repaso en {interval} días)</i>"
+            )
+        else:
+            correct_opt = q["options"][q["correct_idx"]]
+            xp, box, interval = record_answer(user_id, card.slug, "again")
+            feedback = (
+                f"❌ <b>Fallaste:</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Elegiste: <i>{chosen_opt}</i>\n"
+                f"La opción correcta era: <b>{correct_opt}</b>\n"
+                f"Palabra: <b>{card.word}</b> <code>{card.pronunciation}</code>\n"
+                f"💡 Ejemplo: <i>\"{card.example}\"</i>\n\n"
+                f"📦 <i>Vuelve a Caja 1 para afianzar (+{xp} XP)</i>"
+            )
+            
+        await query.message.reply_text(feedback, reply_markup=get_srs_feedback_keyboard(), parse_mode='HTML')
+        return
+
+    if query.data.startswith('srs_hint_'):
+        slug = query.data.replace('srs_hint_', '').strip()
+        card = get_card_by_slug(slug)
+        if card:
+            teacher_text = format_teacher_card(card)
+            await query.message.reply_text(teacher_text, reply_markup=get_srs_hint_keyboard(), parse_mode='HTML')
+        else:
+            await query.message.reply_text("⚠️ No se encontró la ficha.", reply_markup=get_srs_hint_keyboard())
+        return
+
+    if query.data.startswith('srs_rate_'):
+        quality = query.data.replace('srs_rate_', '')
+        sess = user_srs_session.get(user_id)
+        if sess and "current_card" in sess:
+            card = sess["current_card"]
+            xp, box, interval = record_answer(user_id, card.slug, quality)
+            # Avanzar automáticamente al siguiente
+            sess["index"] += 1
+            idx = sess["index"]
+            queue = sess.get("queue", [])
+            if idx < len(queue):
+                next_card = queue[idx]
+                sess["current_card"] = next_card
+                fc = build_flashcard(next_card)
+                sess["current_game"] = fc
+                await query.message.reply_text(
+                    f"⭐ <b>+{xp} XP</b> · Programada a Caja {box} ({interval}d)\n\n" + fc["text"],
+                    reply_markup=get_srs_flashcard_keyboard(next_card.slug),
+                    parse_mode='HTML'
+                )
+            else:
+                await query.message.reply_text(
+                    f"🎉 <b>¡Sesión de Flashcards Completada! (+{xp} XP)</b>\n"
+                    "Todas las tarjetas de la tanda han sido repasadas.",
+                    reply_markup=get_srs_hub_keyboard(),
+                    parse_mode='HTML'
+                )
+        return
+
+    if query.data == 'srs_next':
+        sess = user_srs_session.get(user_id)
+        if not sess or "queue" not in sess:
+            await query.message.reply_text("Sesión finalizada. Usa /study para repasar.", reply_markup=get_srs_hub_keyboard())
+            return
+            
+        sess["index"] += 1
+        idx = sess["index"]
+        queue = sess.get("queue", [])
+        
+        if idx >= len(queue):
+            summary = get_user_srs_summary(user_id)
+            await query.message.reply_text(
+                f"🎉 <b>¡Misión de Repaso Cumplida!</b> 🚀\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Has completado la tanda de hoy.\n"
+                f"⭐ <b>Total XP acumulado:</b> {summary['total_xp']}\n"
+                f"🔥 <b>Racha:</b> {summary['streak']} días consecutivos.\n\n"
+                f"¡Buen trabajo!",
+                reply_markup=get_srs_hub_keyboard(),
+                parse_mode='HTML'
+            )
+            return
+            
+        next_card = queue[idx]
+        sess["current_card"] = next_card
+        mode = sess.get("mode", "trivia")
+        
+        if mode == "trivia":
+            q = build_trivia_question(next_card)
+            sess["current_game"] = q
+            await query.message.reply_text(
+                q["text"],
+                reply_markup=get_srs_choice_keyboard(q["options"], next_card.slug),
+                parse_mode='HTML'
+            )
+        elif mode == "writing":
+            sess["waiting_input"] = True
+            w = build_writing_challenge(next_card)
+            sess["current_game"] = w
+            await query.message.reply_text(w["text"], parse_mode='HTML')
+        elif mode == "flashcard":
+            fc = build_flashcard(next_card)
+            sess["current_game"] = fc
+            await query.message.reply_text(
+                fc["text"],
+                reply_markup=get_srs_flashcard_keyboard(next_card.slug),
+                parse_mode='HTML'
+            )
+        return
+

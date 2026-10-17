@@ -9,7 +9,8 @@ from core.config import TELEGRAM_TOKEN
 from core.telegram.state import user_modes, trivia_options, user_requests_minute, last_user_prompts
 from core.telegram.commands import (
     start, cmd_salir, cmd_limpiar, cmd_comandos,
-    cmd_reintentar, cmd_guardar, cmd_estado, cmd_searchs
+    cmd_reintentar, cmd_guardar, cmd_estado, cmd_searchs,
+    cmd_study, cmd_stats
 )
 from core.telegram.handlers import handle_voice, handle_text
 from core.telegram.callbacks import handle_button_callback
@@ -35,10 +36,12 @@ def setup_bot() -> Application:
     app.add_handler(CommandHandler("guardar", cmd_guardar))
     app.add_handler(CommandHandler("estado", cmd_estado))
     app.add_handler(CommandHandler("searchs", cmd_searchs))
+    app.add_handler(CommandHandler(["study", "aprender", "repasar"], cmd_study))
+    app.add_handler(CommandHandler(["stats", "progreso"], cmd_stats))
     
-    # Mensajes de voz y texto
+    # Mensajes de voz y texto (permite comandos dinámicos como /pista_xxx)
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.TEXT, handle_text))
     
     # Botones Interactivos
     app.add_handler(CallbackQueryHandler(handle_button_callback))
